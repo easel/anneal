@@ -71,4 +71,14 @@ stdlib_deb_install() {
   DEBIAN_FRONTEND=noninteractive dpkg -i "$_tmp" || DEBIAN_FRONTEND=noninteractive apt-get install -f -y
   rm -f "$_tmp"
 }
+
+stdlib_brew_install() {
+  _user="$1"; shift
+  sudo -u "$_user" brew install "$@"
+}
+
+stdlib_brew_tap() {
+  _user="$1"; _tap="$2"
+  sudo -u "$_user" brew tap "$_tap"
+}
 `
