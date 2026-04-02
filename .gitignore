@@ -1,0 +1,21 @@
+# Build
+/anneal
+/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+.secrets.env
+*.pem
+*.key
+
+# HELIX logs
+.helix-logs/
