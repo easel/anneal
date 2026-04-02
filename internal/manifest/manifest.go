@@ -37,6 +37,7 @@ type ResolvedResource struct {
 	Name             string
 	DependsOn        []string
 	Spec             map[string]any
+	Vars             map[string]any // Template context for providers that render external templates
 	DeclarationOrder int
 }
 
@@ -135,13 +136,13 @@ func (m *Manifest) Resolve(opts ResolveOptions) (*ResolvedManifest, error) {
 		Resources: make([]ResolvedResource, 0, len(m.Resources)),
 	}
 	for idx, resource := range m.Resources {
-		name, err := renderString(resource.Name, ctx)
+		name, err := RenderString(resource.Name, ctx)
 		if err != nil {
 			return nil, fmt.Errorf("resource %d name: %w", idx, err)
 		}
 		dependsOn := make([]string, 0, len(resource.DependsOn))
 		for depIdx, dep := range resource.DependsOn {
-			rendered, err := renderString(dep, ctx)
+			rendered, err := RenderString(dep, ctx)
 			if err != nil {
 				return nil, fmt.Errorf("resource %d depends_on[%d]: %w", idx, depIdx, err)
 			}
@@ -160,6 +161,7 @@ func (m *Manifest) Resolve(opts ResolveOptions) (*ResolvedManifest, error) {
 			Name:             name,
 			DependsOn:        dependsOn,
 			Spec:             resolvedSpec,
+			Vars:             mapsClone(ctx),
 			DeclarationOrder: idx,
 		})
 	}
@@ -239,7 +241,7 @@ func makeTemplateContext(vars map[string]any, builtins Builtins) map[string]any 
 func resolveValue(value any, ctx map[string]any) (any, error) {
 	switch typed := value.(type) {
 	case string:
-		return renderString(typed, ctx)
+		return RenderString(typed, ctx)
 	case []any:
 		resolved := make([]any, 0, len(typed))
 		for _, item := range typed {
@@ -253,7 +255,7 @@ func resolveValue(value any, ctx map[string]any) (any, error) {
 	case map[string]any:
 		resolved := make(map[string]any, len(typed))
 		for key, item := range typed {
-			resolvedKey, err := renderString(key, ctx)
+			resolvedKey, err := RenderString(key, ctx)
 			if err != nil {
 				return nil, fmt.Errorf("key %q: %w", key, err)
 			}
@@ -269,7 +271,8 @@ func resolveValue(value any, ctx map[string]any) (any, error) {
 	}
 }
 
-func renderString(value string, ctx map[string]any) (string, error) {
+// RenderString renders a Go template string with the given context and Sprig functions.
+func RenderString(value string, ctx map[string]any) (string, error) {
 	if !strings.Contains(value, "{{") {
 		return value, nil
 	}

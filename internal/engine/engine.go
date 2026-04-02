@@ -127,7 +127,10 @@ type Provider interface {
 func NewPlanner() *Planner {
 	return &Planner{
 		providers: map[string]Provider{
-			"file": fileProvider{},
+			"file":          fileProvider{},
+			"template_file": templateFileProvider{},
+			"static_file":   staticFileProvider{},
+			"file_copy":     fileCopyProvider{},
 		},
 	}
 }
@@ -268,6 +271,132 @@ func (fileProvider) Plan(resource manifest.ResolvedResource) ([]string, error) {
 	delim := uniqueHeredocDelimiter(content)
 	return []string{
 		fmt.Sprintf("stdlib_file_write %s %s %s <<'%s'\n%s\n%s", shellQuote(path), shellQuote(mode), shellQuote(owner), delim, content, delim),
+	}, nil
+}
+
+// templateFileProvider renders a Go template source file with manifest variables
+// and writes the result to the destination path.
+type templateFileProvider struct{}
+
+func (templateFileProvider) Plan(resource manifest.ResolvedResource) ([]string, error) {
+	source, ok := resource.Spec["source"].(string)
+	if !ok || source == "" {
+		return nil, fmt.Errorf("template_file spec.source is required")
+	}
+	path, ok := resource.Spec["path"].(string)
+	if !ok || path == "" {
+		return nil, fmt.Errorf("template_file spec.path is required")
+	}
+
+	tmplContent, err := os.ReadFile(source)
+	if err != nil {
+		return nil, fmt.Errorf("template_file: reading source %s: %w", source, err)
+	}
+
+	rendered, err := manifest.RenderString(string(tmplContent), resource.Vars)
+	if err != nil {
+		return nil, fmt.Errorf("template_file: rendering %s: %w", source, err)
+	}
+
+	current, err := os.ReadFile(path)
+	if err == nil && string(current) == rendered {
+		return nil, nil
+	}
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+
+	mode := "0644"
+	if rawMode, ok := resource.Spec["mode"].(string); ok && rawMode != "" {
+		mode = rawMode
+	}
+	owner := "root:root"
+	if rawOwner, ok := resource.Spec["owner"].(string); ok && rawOwner != "" {
+		owner = rawOwner
+	}
+	delim := uniqueHeredocDelimiter(rendered)
+	return []string{
+		fmt.Sprintf("stdlib_file_write %s %s %s <<'%s'\n%s\n%s", shellQuote(path), shellQuote(mode), shellQuote(owner), delim, rendered, delim),
+	}, nil
+}
+
+// staticFileProvider copies a source file verbatim — no template processing.
+type staticFileProvider struct{}
+
+func (staticFileProvider) Plan(resource manifest.ResolvedResource) ([]string, error) {
+	source, ok := resource.Spec["source"].(string)
+	if !ok || source == "" {
+		return nil, fmt.Errorf("static_file spec.source is required")
+	}
+	path, ok := resource.Spec["path"].(string)
+	if !ok || path == "" {
+		return nil, fmt.Errorf("static_file spec.path is required")
+	}
+
+	srcContent, err := os.ReadFile(source)
+	if err != nil {
+		return nil, fmt.Errorf("static_file: reading source %s: %w", source, err)
+	}
+
+	current, err := os.ReadFile(path)
+	if err == nil && string(current) == string(srcContent) {
+		return nil, nil
+	}
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+
+	mode := "0644"
+	if rawMode, ok := resource.Spec["mode"].(string); ok && rawMode != "" {
+		mode = rawMode
+	}
+	owner := "root:root"
+	if rawOwner, ok := resource.Spec["owner"].(string); ok && rawOwner != "" {
+		owner = rawOwner
+	}
+	content := string(srcContent)
+	delim := uniqueHeredocDelimiter(content)
+	return []string{
+		fmt.Sprintf("stdlib_file_write %s %s %s <<'%s'\n%s\n%s", shellQuote(path), shellQuote(mode), shellQuote(owner), delim, content, delim),
+	}, nil
+}
+
+// fileCopyProvider copies a file from source to destination using stdlib_file_copy.
+type fileCopyProvider struct{}
+
+func (fileCopyProvider) Plan(resource manifest.ResolvedResource) ([]string, error) {
+	source, ok := resource.Spec["source"].(string)
+	if !ok || source == "" {
+		return nil, fmt.Errorf("file_copy spec.source is required")
+	}
+	path, ok := resource.Spec["path"].(string)
+	if !ok || path == "" {
+		return nil, fmt.Errorf("file_copy spec.path is required")
+	}
+
+	srcContent, err := os.ReadFile(source)
+	if err != nil {
+		return nil, fmt.Errorf("file_copy: reading source %s: %w", source, err)
+	}
+
+	current, err := os.ReadFile(path)
+	if err == nil && string(current) == string(srcContent) {
+		return nil, nil
+	}
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+
+	mode := "0644"
+	if rawMode, ok := resource.Spec["mode"].(string); ok && rawMode != "" {
+		mode = rawMode
+	}
+	owner := "root:root"
+	if rawOwner, ok := resource.Spec["owner"].(string); ok && rawOwner != "" {
+		owner = rawOwner
+	}
+	return []string{
+		fmt.Sprintf("stdlib_file_copy %s %s %s %s", shellQuote(source), shellQuote(path), shellQuote(mode), shellQuote(owner)),
 	}, nil
 }
 

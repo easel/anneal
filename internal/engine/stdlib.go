@@ -12,4 +12,13 @@ stdlib_file_write() {
   chmod "$_mode" "$_path"
   chown "$_owner" "$_path" 2>/dev/null || true
 }
+
+stdlib_file_copy() {
+  _src="$1"; _dest="$2"; _mode="$3"; _owner="$4"
+  _dir="$(dirname "$_dest")"
+  [ -d "$_dir" ] || mkdir -p "$_dir"
+  cp "$_src" "$_dest"
+  chmod "$_mode" "$_dest"
+  chown "$_owner" "$_dest" 2>/dev/null || true
+}
 `
