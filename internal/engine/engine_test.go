@@ -70,6 +70,60 @@ func TestPlannerBuildOmitsConvergedFileResources(t *testing.T) {
 	}
 }
 
+func TestPlannerBuildHeredocDelimiterInjection(t *testing.T) {
+	// Content that contains the default delimiter must not cause early termination
+	malicious := "before\nANNEAL_EOF\nrm -rf /\n"
+	path := filepath.Join(t.TempDir(), "evil")
+
+	planner := NewPlanner()
+	plan, err := planner.Build([]manifest.ResolvedResource{
+		fileResource("evil", nil, path, malicious, 0),
+	})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+
+	// The plan must use a different delimiter so ANNEAL_EOF in content is inert
+	if strings.Contains(plan, "<<'ANNEAL_EOF'\n") {
+		t.Fatal("plan used ANNEAL_EOF delimiter despite content containing it")
+	}
+	// The full malicious content must appear verbatim inside the heredoc
+	if !strings.Contains(plan, malicious) {
+		t.Fatal("plan does not contain the full original content")
+	}
+}
+
+func TestPlannerBuildShellQuotesPathModeOwner(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "has spaces")
+
+	planner := NewPlanner()
+	resources := []manifest.ResolvedResource{{
+		Kind:             "file",
+		Name:             "quoted",
+		DeclarationOrder: 0,
+		Spec: map[string]any{
+			"path":    path,
+			"content": "ok",
+			"mode":    "0600",
+			"owner":   "user's:group",
+		},
+	}}
+
+	plan, err := planner.Build(resources)
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+
+	// Path with spaces must be single-quoted
+	if !strings.Contains(plan, "'"+path+"'") {
+		t.Fatalf("path not quoted in plan:\n%s", plan)
+	}
+	// Owner with apostrophe must be safely quoted
+	if !strings.Contains(plan, `'user'\''s:group'`) {
+		t.Fatalf("owner not properly quoted in plan:\n%s", plan)
+	}
+}
+
 func fileResource(name string, dependsOn []string, path string, content string, order int) manifest.ResolvedResource {
 	return manifest.ResolvedResource{
 		Kind:             "file",

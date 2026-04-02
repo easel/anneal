@@ -102,9 +102,24 @@ func (fileProvider) Plan(resource manifest.ResolvedResource) ([]string, error) {
 	if rawOwner, ok := resource.Spec["owner"].(string); ok && rawOwner != "" {
 		owner = rawOwner
 	}
+	delim := uniqueHeredocDelimiter(content)
 	return []string{
-		fmt.Sprintf("stdlib_file_write %s %s %s <<'ANNEAL_EOF'\n%s\nANNEAL_EOF", path, mode, owner, content),
+		fmt.Sprintf("stdlib_file_write %s %s %s <<'%s'\n%s\n%s", shellQuote(path), shellQuote(mode), shellQuote(owner), delim, content, delim),
 	}, nil
+}
+
+// shellQuote wraps a string in single quotes, escaping any embedded single quotes.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// uniqueHeredocDelimiter returns a delimiter guaranteed not to appear in content.
+func uniqueHeredocDelimiter(content string) string {
+	delim := "ANNEAL_EOF"
+	for strings.Contains(content, delim) {
+		delim += "_"
+	}
+	return delim
 }
 
 func topoSort(resources []manifest.ResolvedResource) ([]manifest.ResolvedResource, error) {
