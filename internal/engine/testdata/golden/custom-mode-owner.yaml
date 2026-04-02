@@ -1,0 +1,7 @@
+- kind: file
+  name: secret-file
+  spec:
+    path: "{{TMPDIR}}/secret"
+    content: "secret data"
+    mode: "0600"
+    owner: "nobody:nogroup"

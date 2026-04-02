@@ -1,0 +1,9 @@
+#!/bin/sh
+set -e
+
+# new file
+stdlib_file_write '{{TMPDIR}}/heredoc' '0644' 'root:root' <<'ANNEAL_EOF_'
+line one
+ANNEAL_EOF
+line three
+ANNEAL_EOF_

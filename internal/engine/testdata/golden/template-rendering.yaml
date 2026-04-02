@@ -1,0 +1,5 @@
+- kind: file
+  name: templated
+  spec:
+    path: "{{TMPDIR}}/greeting"
+    content: "Hello, {{ .name }}! Your role is {{ .role }}."

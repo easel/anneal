@@ -1,0 +1,5 @@
+- kind: file
+  name: test-file
+  spec:
+    path: "{{TMPDIR}}/test"
+    content: "hello world"

@@ -1,0 +1,22 @@
+#!/bin/sh
+set -e
+
+# new file
+stdlib_file_write '{{TMPDIR}}/base' '0644' 'root:root' <<'ANNEAL_EOF'
+base content
+ANNEAL_EOF
+
+# new file
+stdlib_file_write '{{TMPDIR}}/left' '0644' 'root:root' <<'ANNEAL_EOF'
+left content
+ANNEAL_EOF
+
+# new file
+stdlib_file_write '{{TMPDIR}}/right' '0644' 'root:root' <<'ANNEAL_EOF'
+right content
+ANNEAL_EOF
+
+# new file
+stdlib_file_write '{{TMPDIR}}/leaf' '0644' 'root:root' <<'ANNEAL_EOF'
+leaf content
+ANNEAL_EOF

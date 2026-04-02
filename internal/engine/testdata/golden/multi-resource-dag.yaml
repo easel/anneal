@@ -1,0 +1,26 @@
+- kind: file
+  name: base
+  spec:
+    path: "{{TMPDIR}}/base"
+    content: "base content"
+
+- kind: file
+  name: left
+  depends_on: [base]
+  spec:
+    path: "{{TMPDIR}}/left"
+    content: "left content"
+
+- kind: file
+  name: right
+  depends_on: [base]
+  spec:
+    path: "{{TMPDIR}}/right"
+    content: "right content"
+
+- kind: file
+  name: leaf
+  depends_on: [left, right]
+  spec:
+    path: "{{TMPDIR}}/leaf"
+    content: "leaf content"

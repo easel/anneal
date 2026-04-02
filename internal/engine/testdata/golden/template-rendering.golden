@@ -1,0 +1,7 @@
+#!/bin/sh
+set -e
+
+# new file
+stdlib_file_write '{{TMPDIR}}/greeting' '0644' 'root:root' <<'ANNEAL_EOF'
+Hello, {{ .name }}! Your role is {{ .role }}.
+ANNEAL_EOF

@@ -1,0 +1,5 @@
+- kind: file
+  name: heredoc-edge
+  spec:
+    path: "{{TMPDIR}}/heredoc"
+    content: "line one\nANNEAL_EOF\nline three"
