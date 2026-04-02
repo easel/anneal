@@ -140,6 +140,8 @@ func NewPlanner() *Planner {
 			"file_absent":   fileAbsentProvider{},
 			"apt_packages":  aptPackagesProvider{},
 			"apt_purge":     aptPurgeProvider{},
+			"apt_repo":      aptRepoProvider{},
+			"deb_install":   debInstallProvider{},
 		},
 	}
 }

@@ -52,4 +52,23 @@ stdlib_apt_purge() {
 stdlib_debconf_set() {
   echo "$@" | debconf-set-selections
 }
+
+stdlib_apt_key_add() {
+  _url="$1"; _keyring="$2"
+  _dir="$(dirname "$_keyring")"
+  [ -d "$_dir" ] || mkdir -p "$_dir"
+  curl -fsSL "$_url" | gpg --dearmor -o "$_keyring"
+}
+
+stdlib_apt_source_add() {
+  _file="$1"; _line="$2"
+  printf '%s\n' "$_line" > "$_file"
+}
+
+stdlib_deb_install() {
+  _url="$1"; _tmp="$(mktemp /tmp/anneal-deb-XXXXXX.deb)"
+  curl -fsSL -o "$_tmp" "$_url"
+  DEBIAN_FRONTEND=noninteractive dpkg -i "$_tmp" || DEBIAN_FRONTEND=noninteractive apt-get install -f -y
+  rm -f "$_tmp"
+}
 `

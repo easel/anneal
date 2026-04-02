@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -164,4 +165,102 @@ func (aptPurgeProvider) Plan(resource manifest.ResolvedResource) ([]string, erro
 		fmt.Sprintf("# purge %d package(s)", len(present)),
 		fmt.Sprintf("stdlib_apt_purge %s", strings.Join(quoted, " ")),
 	}, nil
+}
+
+// fileExistsFunc checks whether a file exists. Injectable for testing.
+var fileExistsFunc = func(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// readFileFunc reads a file. Injectable for testing.
+var readFileFunc = os.ReadFile
+
+// dpkgVersionFunc queries the installed version of a single package.
+// Returns empty string if the package is not installed.
+var dpkgVersionFunc = dpkgVersionReal
+
+func dpkgVersionReal(name string) string {
+	cmd := exec.Command("dpkg-query", "-W", "-f", "${Version}", name)
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// aptRepoProvider manages external apt repository signing keys and sources entries.
+type aptRepoProvider struct{}
+
+func (aptRepoProvider) Plan(resource manifest.ResolvedResource) ([]string, error) {
+	keyURL, _ := resource.Spec["key_url"].(string)
+	keyring, _ := resource.Spec["keyring"].(string)
+	sourceLine, _ := resource.Spec["source"].(string)
+	sourceFile, _ := resource.Spec["source_file"].(string)
+
+	if sourceLine == "" {
+		return nil, fmt.Errorf("apt_repo spec.source is required")
+	}
+	if sourceFile == "" {
+		return nil, fmt.Errorf("apt_repo spec.source_file is required")
+	}
+
+	var ops []string
+
+	// Check if signing key needs to be installed
+	if keyURL != "" && keyring != "" {
+		if !fileExistsFunc(keyring) {
+			ops = append(ops, fmt.Sprintf("# add signing key → %s", keyring))
+			ops = append(ops, fmt.Sprintf("stdlib_apt_key_add %s %s", shellQuote(keyURL), shellQuote(keyring)))
+		}
+	}
+
+	// Check if sources file needs to be written
+	needsSource := true
+	if fileExistsFunc(sourceFile) {
+		current, err := readFileFunc(sourceFile)
+		if err == nil && strings.TrimSpace(string(current)) == strings.TrimSpace(sourceLine) {
+			needsSource = false
+		}
+	}
+
+	if needsSource {
+		ops = append(ops, fmt.Sprintf("# add apt source → %s", sourceFile))
+		ops = append(ops, fmt.Sprintf("stdlib_apt_source_add %s %s", shellQuote(sourceFile), shellQuote(sourceLine)))
+	}
+
+	return ops, nil
+}
+
+// debInstallProvider installs a .deb package from a URL with version tracking.
+type debInstallProvider struct{}
+
+func (debInstallProvider) Plan(resource manifest.ResolvedResource) ([]string, error) {
+	url, ok := resource.Spec["url"].(string)
+	if !ok || url == "" {
+		return nil, fmt.Errorf("deb_install spec.url is required")
+	}
+	pkg, ok := resource.Spec["package"].(string)
+	if !ok || pkg == "" {
+		return nil, fmt.Errorf("deb_install spec.package is required")
+	}
+	version, ok := resource.Spec["version"].(string)
+	if !ok || version == "" {
+		return nil, fmt.Errorf("deb_install spec.version is required")
+	}
+
+	// Check if the package is already installed at the declared version
+	installedVersion := dpkgVersionFunc(pkg)
+	if installedVersion == version {
+		return nil, nil // Already at declared version
+	}
+
+	var ops []string
+	if installedVersion == "" {
+		ops = append(ops, fmt.Sprintf("# install %s %s", pkg, version))
+	} else {
+		ops = append(ops, fmt.Sprintf("# upgrade %s: %s → %s", pkg, installedVersion, version))
+	}
+	ops = append(ops, fmt.Sprintf("stdlib_deb_install %s", shellQuote(url)))
+	return ops, nil
 }
