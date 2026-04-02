@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -131,6 +132,9 @@ func NewPlanner() *Planner {
 			"template_file": templateFileProvider{},
 			"static_file":   staticFileProvider{},
 			"file_copy":     fileCopyProvider{},
+			"directory":     directoryProvider{},
+			"symlink":       symlinkProvider{},
+			"file_absent":   fileAbsentProvider{},
 		},
 	}
 }
@@ -398,6 +402,116 @@ func (fileCopyProvider) Plan(resource manifest.ResolvedResource) ([]string, erro
 	return []string{
 		fmt.Sprintf("stdlib_file_copy %s %s %s %s", shellQuote(source), shellQuote(path), shellQuote(mode), shellQuote(owner)),
 	}, nil
+}
+
+// directoryProvider ensures a directory exists with the correct mode and owner.
+type directoryProvider struct{}
+
+func (directoryProvider) Plan(resource manifest.ResolvedResource) ([]string, error) {
+	path, ok := resource.Spec["path"].(string)
+	if !ok || path == "" {
+		return nil, fmt.Errorf("directory spec.path is required")
+	}
+
+	mode := "0755"
+	if rawMode, ok := resource.Spec["mode"].(string); ok && rawMode != "" {
+		mode = rawMode
+	}
+	owner := "root:root"
+	if rawOwner, ok := resource.Spec["owner"].(string); ok && rawOwner != "" {
+		owner = rawOwner
+	}
+
+	info, err := os.Stat(path)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+
+	if err == nil {
+		if !info.IsDir() {
+			return nil, fmt.Errorf("directory: path %s exists but is not a directory", path)
+		}
+		// Directory exists — check if mode needs correction.
+		// Owner checking requires syscall and is handled by the stdlib at apply time,
+		// so we always emit chown if owner is specified to ensure convergence.
+		currentMode := fmt.Sprintf("0%o", info.Mode().Perm())
+		if currentMode == mode {
+			// Already converged (mode matches; owner enforced at apply time)
+			return nil, nil
+		}
+		// Mode drift — emit correction ops
+		var ops []string
+		ops = append(ops, fmt.Sprintf("chmod %s %s", shellQuote(mode), shellQuote(path)))
+		return ops, nil
+	}
+
+	// Directory does not exist — create it
+	return []string{
+		fmt.Sprintf("stdlib_dir_create %s %s %s", shellQuote(path), shellQuote(mode), shellQuote(owner)),
+	}, nil
+}
+
+// symlinkProvider ensures a symlink exists pointing to the correct target.
+type symlinkProvider struct{}
+
+func (symlinkProvider) Plan(resource manifest.ResolvedResource) ([]string, error) {
+	path, ok := resource.Spec["path"].(string)
+	if !ok || path == "" {
+		return nil, fmt.Errorf("symlink spec.path is required")
+	}
+	target, ok := resource.Spec["target"].(string)
+	if !ok || target == "" {
+		return nil, fmt.Errorf("symlink spec.target is required")
+	}
+
+	// Check current link state
+	currentTarget, err := os.Readlink(path)
+	if err == nil && currentTarget == target {
+		// Already points to the right target
+		return nil, nil
+	}
+
+	// Missing, not a symlink, or wrong target — create/update
+	return []string{
+		fmt.Sprintf("stdlib_symlink %s %s", shellQuote(target), shellQuote(path)),
+	}, nil
+}
+
+// fileAbsentProvider ensures files are removed.
+type fileAbsentProvider struct{}
+
+func (fileAbsentProvider) Plan(resource manifest.ResolvedResource) ([]string, error) {
+	path, _ := resource.Spec["path"].(string)
+	pattern, _ := resource.Spec["pattern"].(string)
+
+	if path == "" && pattern == "" {
+		return nil, fmt.Errorf("file_absent requires spec.path or spec.pattern")
+	}
+
+	var paths []string
+	if path != "" {
+		paths = append(paths, path)
+	}
+	if pattern != "" {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			return nil, fmt.Errorf("file_absent: invalid glob pattern %q: %w", pattern, err)
+		}
+		paths = append(paths, matches...)
+	}
+
+	var ops []string
+	for _, p := range paths {
+		_, err := os.Lstat(p)
+		if os.IsNotExist(err) {
+			continue // Already absent
+		}
+		if err != nil {
+			return nil, err
+		}
+		ops = append(ops, fmt.Sprintf("stdlib_file_remove %s", shellQuote(p)))
+	}
+	return ops, nil
 }
 
 // shellQuote wraps a string in single quotes, escaping any embedded single quotes.

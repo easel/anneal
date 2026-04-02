@@ -601,6 +601,456 @@ func TestFileCopyEmitsSourcePath(t *testing.T) {
 	}
 }
 
+func TestDirectoryProviderStateMatrix(t *testing.T) {
+	tests := []struct {
+		name        string
+		setup       func(dir string) string // returns path; creates state
+		mode        string
+		owner       string
+		wantOps     bool
+		wantContent string
+	}{
+		{
+			name: "absent directory gets created",
+			setup: func(dir string) string {
+				return filepath.Join(dir, "newdir")
+			},
+			wantOps:     true,
+			wantContent: "stdlib_dir_create",
+		},
+		{
+			name: "existing directory with correct mode is converged",
+			setup: func(dir string) string {
+				p := filepath.Join(dir, "existing")
+				os.Mkdir(p, 0o755)
+				return p
+			},
+			mode:    "0755",
+			wantOps: false,
+		},
+		{
+			name: "existing directory with wrong mode triggers chmod",
+			setup: func(dir string) string {
+				p := filepath.Join(dir, "wrongmode")
+				os.Mkdir(p, 0o755)
+				return p
+			},
+			mode:        "0700",
+			wantOps:     true,
+			wantContent: "chmod",
+		},
+		{
+			name: "nested absent directory gets created",
+			setup: func(dir string) string {
+				return filepath.Join(dir, "a", "b", "c")
+			},
+			wantOps:     true,
+			wantContent: "stdlib_dir_create",
+		},
+		{
+			name: "custom mode in create output",
+			setup: func(dir string) string {
+				return filepath.Join(dir, "custom")
+			},
+			mode:        "0700",
+			wantOps:     true,
+			wantContent: "'0700'",
+		},
+		{
+			name: "custom owner in create output",
+			setup: func(dir string) string {
+				return filepath.Join(dir, "owndir")
+			},
+			owner:       "app:app",
+			wantOps:     true,
+			wantContent: "'app:app'",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := tt.setup(dir)
+
+			spec := map[string]any{"path": path}
+			if tt.mode != "" {
+				spec["mode"] = tt.mode
+			}
+			if tt.owner != "" {
+				spec["owner"] = tt.owner
+			}
+
+			provider := directoryProvider{}
+			ops, err := provider.Plan(manifest.ResolvedResource{
+				Kind: "directory",
+				Name: "test",
+				Spec: spec,
+			})
+			if err != nil {
+				t.Fatalf("Plan() error = %v", err)
+			}
+
+			if tt.wantOps && len(ops) == 0 {
+				t.Fatal("expected operations but got none")
+			}
+			if !tt.wantOps && len(ops) > 0 {
+				t.Fatalf("expected no operations but got: %v", ops)
+			}
+			if tt.wantContent != "" {
+				joined := strings.Join(ops, "\n")
+				if !strings.Contains(joined, tt.wantContent) {
+					t.Fatalf("ops missing %q:\n%s", tt.wantContent, joined)
+				}
+			}
+		})
+	}
+}
+
+func TestDirectoryProviderValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		spec    map[string]any
+		setup   func(dir string) string
+		wantErr string
+	}{
+		{
+			name:    "missing path",
+			spec:    map[string]any{},
+			wantErr: "path is required",
+		},
+		{
+			name:    "empty path",
+			spec:    map[string]any{"path": ""},
+			wantErr: "path is required",
+		},
+		{
+			name: "path exists but is a file",
+			spec: map[string]any{"path": "PLACEHOLDER"},
+			setup: func(dir string) string {
+				p := filepath.Join(dir, "afile")
+				os.WriteFile(p, []byte("x"), 0o644)
+				return p
+			},
+			wantErr: "not a directory",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			spec := make(map[string]any)
+			for k, v := range tt.spec {
+				spec[k] = v
+			}
+			if tt.setup != nil {
+				p := tt.setup(dir)
+				if spec["path"] == "PLACEHOLDER" {
+					spec["path"] = p
+				}
+			}
+
+			provider := directoryProvider{}
+			_, err := provider.Plan(manifest.ResolvedResource{
+				Kind: "directory",
+				Name: "test",
+				Spec: spec,
+			})
+			if err == nil {
+				t.Fatalf("expected error containing %q", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error = %q, want containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestSymlinkProviderStateMatrix(t *testing.T) {
+	tests := []struct {
+		name        string
+		setup       func(dir string) (path, target string)
+		wantOps     bool
+		wantContent string
+	}{
+		{
+			name: "absent symlink gets created",
+			setup: func(dir string) (string, string) {
+				return filepath.Join(dir, "link"), "/some/target"
+			},
+			wantOps:     true,
+			wantContent: "stdlib_symlink",
+		},
+		{
+			name: "correct symlink is converged",
+			setup: func(dir string) (string, string) {
+				target := filepath.Join(dir, "target")
+				os.WriteFile(target, []byte("x"), 0o644)
+				link := filepath.Join(dir, "link")
+				os.Symlink(target, link)
+				return link, target
+			},
+			wantOps: false,
+		},
+		{
+			name: "wrong target triggers update",
+			setup: func(dir string) (string, string) {
+				link := filepath.Join(dir, "link")
+				os.Symlink("/old/target", link)
+				return link, "/new/target"
+			},
+			wantOps:     true,
+			wantContent: "stdlib_symlink",
+		},
+		{
+			name: "broken symlink to correct target is converged",
+			setup: func(dir string) (string, string) {
+				target := "/nonexistent/target"
+				link := filepath.Join(dir, "link")
+				os.Symlink(target, link)
+				return link, target
+			},
+			wantOps: false,
+		},
+		{
+			name: "regular file at path triggers update",
+			setup: func(dir string) (string, string) {
+				link := filepath.Join(dir, "link")
+				os.WriteFile(link, []byte("not a link"), 0o644)
+				return link, "/some/target"
+			},
+			wantOps:     true,
+			wantContent: "stdlib_symlink",
+		},
+		{
+			name: "target path appears in output",
+			setup: func(dir string) (string, string) {
+				return filepath.Join(dir, "link"), "/specific/target/path"
+			},
+			wantOps:     true,
+			wantContent: "/specific/target/path",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path, target := tt.setup(dir)
+
+			provider := symlinkProvider{}
+			ops, err := provider.Plan(manifest.ResolvedResource{
+				Kind: "symlink",
+				Name: "test",
+				Spec: map[string]any{
+					"path":   path,
+					"target": target,
+				},
+			})
+			if err != nil {
+				t.Fatalf("Plan() error = %v", err)
+			}
+
+			if tt.wantOps && len(ops) == 0 {
+				t.Fatal("expected operations but got none")
+			}
+			if !tt.wantOps && len(ops) > 0 {
+				t.Fatalf("expected no operations but got: %v", ops)
+			}
+			if tt.wantContent != "" {
+				joined := strings.Join(ops, "\n")
+				if !strings.Contains(joined, tt.wantContent) {
+					t.Fatalf("ops missing %q:\n%s", tt.wantContent, joined)
+				}
+			}
+		})
+	}
+}
+
+func TestSymlinkProviderValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		spec    map[string]any
+		wantErr string
+	}{
+		{
+			name:    "missing path",
+			spec:    map[string]any{"target": "/foo"},
+			wantErr: "path is required",
+		},
+		{
+			name:    "missing target",
+			spec:    map[string]any{"path": "/foo"},
+			wantErr: "target is required",
+		},
+		{
+			name:    "both missing",
+			spec:    map[string]any{},
+			wantErr: "path is required",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := symlinkProvider{}
+			_, err := provider.Plan(manifest.ResolvedResource{
+				Kind: "symlink",
+				Name: "test",
+				Spec: tt.spec,
+			})
+			if err == nil {
+				t.Fatalf("expected error containing %q", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error = %q, want containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestFileAbsentProviderStateMatrix(t *testing.T) {
+	tests := []struct {
+		name        string
+		setup       func(dir string) map[string]any // returns spec
+		wantOps     bool
+		wantContent string
+	}{
+		{
+			name: "present file produces remove op",
+			setup: func(dir string) map[string]any {
+				p := filepath.Join(dir, "target")
+				os.WriteFile(p, []byte("x"), 0o644)
+				return map[string]any{"path": p}
+			},
+			wantOps:     true,
+			wantContent: "stdlib_file_remove",
+		},
+		{
+			name: "absent file produces no ops",
+			setup: func(dir string) map[string]any {
+				return map[string]any{"path": filepath.Join(dir, "nonexistent")}
+			},
+			wantOps: false,
+		},
+		{
+			name: "glob matches present files",
+			setup: func(dir string) map[string]any {
+				os.WriteFile(filepath.Join(dir, "a.tmp"), []byte("x"), 0o644)
+				os.WriteFile(filepath.Join(dir, "b.tmp"), []byte("y"), 0o644)
+				return map[string]any{"pattern": filepath.Join(dir, "*.tmp")}
+			},
+			wantOps:     true,
+			wantContent: "stdlib_file_remove",
+		},
+		{
+			name: "glob matches zero files produces no ops",
+			setup: func(dir string) map[string]any {
+				return map[string]any{"pattern": filepath.Join(dir, "*.nonexistent")}
+			},
+			wantOps: false,
+		},
+		{
+			name: "symlink is removed",
+			setup: func(dir string) map[string]any {
+				link := filepath.Join(dir, "link")
+				os.Symlink("/whatever", link)
+				return map[string]any{"path": link}
+			},
+			wantOps:     true,
+			wantContent: "stdlib_file_remove",
+		},
+		{
+			name: "multiple glob matches produce multiple ops",
+			setup: func(dir string) map[string]any {
+				os.WriteFile(filepath.Join(dir, "x.log"), []byte("a"), 0o644)
+				os.WriteFile(filepath.Join(dir, "y.log"), []byte("b"), 0o644)
+				os.WriteFile(filepath.Join(dir, "z.log"), []byte("c"), 0o644)
+				return map[string]any{"pattern": filepath.Join(dir, "*.log")}
+			},
+			wantOps:     true,
+			wantContent: "stdlib_file_remove",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			spec := tt.setup(dir)
+
+			provider := fileAbsentProvider{}
+			ops, err := provider.Plan(manifest.ResolvedResource{
+				Kind: "file_absent",
+				Name: "test",
+				Spec: spec,
+			})
+			if err != nil {
+				t.Fatalf("Plan() error = %v", err)
+			}
+
+			if tt.wantOps && len(ops) == 0 {
+				t.Fatal("expected operations but got none")
+			}
+			if !tt.wantOps && len(ops) > 0 {
+				t.Fatalf("expected no operations but got: %v", ops)
+			}
+			if tt.wantContent != "" {
+				joined := strings.Join(ops, "\n")
+				if !strings.Contains(joined, tt.wantContent) {
+					t.Fatalf("ops missing %q:\n%s", tt.wantContent, joined)
+				}
+			}
+		})
+	}
+}
+
+func TestFileAbsentProviderMultipleGlobOps(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "a.tmp"), []byte("x"), 0o644)
+	os.WriteFile(filepath.Join(dir, "b.tmp"), []byte("y"), 0o644)
+
+	provider := fileAbsentProvider{}
+	ops, err := provider.Plan(manifest.ResolvedResource{
+		Kind: "file_absent",
+		Name: "test",
+		Spec: map[string]any{"pattern": filepath.Join(dir, "*.tmp")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ops) != 2 {
+		t.Fatalf("expected 2 operations, got %d: %v", len(ops), ops)
+	}
+}
+
+func TestFileAbsentProviderValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		spec    map[string]any
+		wantErr string
+	}{
+		{
+			name:    "missing path and pattern",
+			spec:    map[string]any{},
+			wantErr: "requires spec.path or spec.pattern",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := fileAbsentProvider{}
+			_, err := provider.Plan(manifest.ResolvedResource{
+				Kind: "file_absent",
+				Name: "test",
+				Spec: tt.spec,
+			})
+			if err == nil {
+				t.Fatalf("expected error containing %q", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error = %q, want containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestFileProviderValidation(t *testing.T) {
 	tests := []struct {
 		name    string

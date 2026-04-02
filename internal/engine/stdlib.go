@@ -21,4 +21,23 @@ stdlib_file_copy() {
   chmod "$_mode" "$_dest"
   chown "$_owner" "$_dest" 2>/dev/null || true
 }
+
+stdlib_dir_create() {
+  _path="$1"; _mode="$2"; _owner="$3"
+  mkdir -p "$_path"
+  chmod "$_mode" "$_path"
+  chown "$_owner" "$_path" 2>/dev/null || true
+}
+
+stdlib_symlink() {
+  _target="$1"; _link="$2"
+  _dir="$(dirname "$_link")"
+  [ -d "$_dir" ] || mkdir -p "$_dir"
+  ln -snf "$_target" "$_link"
+}
+
+stdlib_file_remove() {
+  _path="$1"
+  rm -f "$_path"
+}
 `
