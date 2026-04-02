@@ -1,0 +1,44 @@
+# Smoke test manifest — exercises the core validate → plan → apply → idempotent
+# re-apply workflow with real provider paths (file, directory, symlink, command).
+#
+# This manifest is designed to run in any writable environment (container or
+# local tmpdir) without requiring root, network, or special system packages.
+#
+# Set ANNEAL_SMOKE_ROOT to override the default smoke root path.
+
+vars:
+  smoke_root: "/tmp/anneal-smoke-default"
+
+resources:
+  - name: smoke-dir
+    kind: directory
+    spec:
+      path: "{{.smoke_root}}/data"
+      mode: "0755"
+      owner: "root:root"
+
+  - name: smoke-config
+    kind: file
+    depends_on:
+      - smoke-dir
+    spec:
+      path: "{{.smoke_root}}/data/config.txt"
+      content: "# Anneal smoke test configuration\nsetting_a = enabled\nsetting_b = 42"
+      mode: "0644"
+      owner: "root:root"
+
+  - name: smoke-link
+    kind: symlink
+    depends_on:
+      - smoke-config
+    spec:
+      path: "{{.smoke_root}}/config-link"
+      target: "{{.smoke_root}}/data/config.txt"
+
+  - name: smoke-flag
+    kind: command
+    depends_on:
+      - smoke-dir
+    spec:
+      command: "echo 'smoke-ok' > '{{.smoke_root}}/data/flag'"
+      creates: "{{.smoke_root}}/data/flag"
