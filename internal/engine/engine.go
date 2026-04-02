@@ -15,9 +15,10 @@ import (
 
 // ResourcePlan holds the planned operations for a single resource.
 type ResourcePlan struct {
-	Name   string
-	Kind   string
-	Script string // Shell fragment for this resource (empty = already converged)
+	Name    string
+	Kind    string
+	Script  string // Shell fragment for this resource (empty = already converged)
+	Trigger bool   // True if this is a trigger resource
 }
 
 // Plan holds the full execution plan with per-resource breakdown.
@@ -142,25 +143,59 @@ func NewPlanner() *Planner {
 }
 
 func (p *Planner) Validate(resources []manifest.ResolvedResource) error {
-	if _, err := topoSort(resources); err != nil {
+	// Separate normal and trigger resources.
+	var normal []manifest.ResolvedResource
+	triggerSet := map[string]bool{}
+	for _, r := range resources {
+		if r.Trigger {
+			triggerSet[r.Name] = true
+		} else {
+			normal = append(normal, r)
+		}
+	}
+
+	// Validate dependency graph for normal resources only (triggers are ordered after).
+	if _, err := topoSort(normal); err != nil {
 		return err
 	}
-	for _, resource := range resources {
-		if _, ok := p.providers[resource.Kind]; !ok {
-			return fmt.Errorf("resource %s: unknown kind %q", resource.Name, resource.Kind)
+
+	for _, r := range resources {
+		if _, ok := p.providers[r.Kind]; !ok {
+			return fmt.Errorf("resource %s: unknown kind %q", r.Name, r.Kind)
+		}
+		// Validate that notify targets reference trigger resources.
+		for _, target := range r.Notify {
+			if !triggerSet[target] {
+				return fmt.Errorf("resource %s: notify target %q is not a trigger resource", r.Name, target)
+			}
 		}
 	}
 	return nil
 }
 
 // BuildPlan produces a structured plan with per-resource operations.
+// Trigger resources are ordered after all normal resources and only
+// receive operations when at least one notifying resource has changes.
 func (p *Planner) BuildPlan(resources []manifest.ResolvedResource) (*Plan, error) {
-	ordered, err := topoSort(resources)
+	// Separate normal and trigger resources.
+	var normal, triggers []manifest.ResolvedResource
+	for _, r := range resources {
+		if r.Trigger {
+			triggers = append(triggers, r)
+		} else {
+			normal = append(normal, r)
+		}
+	}
+
+	ordered, err := topoSort(normal)
 	if err != nil {
 		return nil, err
 	}
 
+	// Plan normal resources and track which triggers are notified.
 	plan := &Plan{}
+	notifiedTriggers := map[string]bool{}
+
 	for _, resource := range ordered {
 		provider, ok := p.providers[resource.Kind]
 		if !ok {
@@ -173,6 +208,10 @@ func (p *Planner) BuildPlan(resources []manifest.ResolvedResource) (*Plan, error
 		var script string
 		if len(ops) > 0 {
 			script = strings.Join(ops, "\n")
+			// Resource has changes — mark its notify targets as pending.
+			for _, target := range resource.Notify {
+				notifiedTriggers[target] = true
+			}
 		}
 		plan.Resources = append(plan.Resources, ResourcePlan{
 			Name:   resource.Name,
@@ -180,6 +219,39 @@ func (p *Planner) BuildPlan(resources []manifest.ResolvedResource) (*Plan, error
 			Script: script,
 		})
 	}
+
+	// Plan trigger resources — only if notified by a changed resource.
+	sortReady(triggers)
+	for _, resource := range triggers {
+		if !notifiedTriggers[resource.Name] {
+			// Not notified — converged (no operations).
+			plan.Resources = append(plan.Resources, ResourcePlan{
+				Name:    resource.Name,
+				Kind:    resource.Kind,
+				Trigger: true,
+			})
+			continue
+		}
+		provider, ok := p.providers[resource.Kind]
+		if !ok {
+			return nil, fmt.Errorf("trigger %s: unknown kind %q", resource.Name, resource.Kind)
+		}
+		ops, err := provider.Plan(resource)
+		if err != nil {
+			return nil, fmt.Errorf("trigger %s: %w", resource.Name, err)
+		}
+		var script string
+		if len(ops) > 0 {
+			script = "# triggered\n" + strings.Join(ops, "\n")
+		}
+		plan.Resources = append(plan.Resources, ResourcePlan{
+			Name:    resource.Name,
+			Kind:    resource.Kind,
+			Script:  script,
+			Trigger: true,
+		})
+	}
+
 	return plan, nil
 }
 

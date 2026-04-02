@@ -33,6 +33,8 @@ type Resource struct {
 	Name      string         `yaml:"name"`
 	DependsOn []string       `yaml:"depends_on"`
 	Each      []any          `yaml:"each"`
+	Notify    []string       `yaml:"notify"`
+	Trigger   bool           `yaml:"trigger"`
 	Spec      map[string]any `yaml:"spec"`
 }
 
@@ -45,6 +47,8 @@ type ResolvedResource struct {
 	Kind             string
 	Name             string
 	DependsOn        []string
+	Notify           []string
+	Trigger          bool
 	Spec             map[string]any
 	Vars             map[string]any // Template context for providers that render external templates
 	DeclarationOrder int
@@ -308,6 +312,8 @@ func (m *Manifest) Resolve(opts ResolveOptions) (*ResolvedManifest, error) {
 			Kind:             er.resource.Kind,
 			Name:             name,
 			DependsOn:        dependsOn,
+			Notify:           er.resource.Notify,
+			Trigger:          er.resource.Trigger,
 			Spec:             resolvedSpec,
 			Vars:             mapsClone(resourceCtx),
 			DeclarationOrder: idx,

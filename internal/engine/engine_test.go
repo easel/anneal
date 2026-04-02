@@ -277,6 +277,301 @@ func TestApplyDriftDetectionPassesOnMatch(t *testing.T) {
 	}
 }
 
+func TestTriggerOrderedAfterNormalResources(t *testing.T) {
+	dir := t.TempDir()
+	pathA := filepath.Join(dir, "a")
+	pathT := filepath.Join(dir, "trigger")
+
+	planner := NewPlanner()
+	resources := []manifest.ResolvedResource{
+		// Trigger declared first in the manifest
+		{
+			Kind: "file", Name: "restart", Trigger: true,
+			DeclarationOrder: 0,
+			Spec: map[string]any{"path": pathT, "content": "triggered"},
+		},
+		// Normal resource declared second, notifies the trigger
+		{
+			Kind: "file", Name: "config",
+			Notify:           []string{"restart"},
+			DeclarationOrder: 1,
+			Spec: map[string]any{"path": pathA, "content": "new config"},
+		},
+	}
+
+	plan, err := planner.BuildPlan(resources)
+	if err != nil {
+		t.Fatalf("BuildPlan() error = %v", err)
+	}
+
+	// Normal resource should come before trigger regardless of declaration order
+	if len(plan.Resources) != 2 {
+		t.Fatalf("len(Resources) = %d, want 2", len(plan.Resources))
+	}
+	if plan.Resources[0].Name != "config" {
+		t.Fatalf("first resource = %q, want config (normal before trigger)", plan.Resources[0].Name)
+	}
+	if plan.Resources[1].Name != "restart" {
+		t.Fatalf("second resource = %q, want restart (trigger after normal)", plan.Resources[1].Name)
+	}
+	if !plan.Resources[1].Trigger {
+		t.Fatal("restart should be marked as trigger")
+	}
+}
+
+func TestTriggerFiresWhenNotifierChanges(t *testing.T) {
+	dir := t.TempDir()
+	pathA := filepath.Join(dir, "config")
+	pathT := filepath.Join(dir, "trigger")
+
+	planner := NewPlanner()
+	resources := []manifest.ResolvedResource{
+		{
+			Kind: "file", Name: "config",
+			Notify:           []string{"restart"},
+			DeclarationOrder: 0,
+			Spec: map[string]any{"path": pathA, "content": "new config"},
+		},
+		{
+			Kind: "file", Name: "restart", Trigger: true,
+			DeclarationOrder: 1,
+			Spec: map[string]any{"path": pathT, "content": "restart action"},
+		},
+	}
+
+	plan, err := planner.BuildPlan(resources)
+	if err != nil {
+		t.Fatalf("BuildPlan() error = %v", err)
+	}
+
+	// Config is new (file doesn't exist) so it has changes → trigger should fire
+	if plan.Resources[1].Script == "" {
+		t.Fatal("trigger should have a script when notifier has changes")
+	}
+	if !strings.Contains(plan.Resources[1].Script, "# triggered") {
+		t.Fatalf("trigger script should contain '# triggered' comment, got:\n%s", plan.Resources[1].Script)
+	}
+}
+
+func TestTriggerDoesNotFireWhenNotifierConverged(t *testing.T) {
+	dir := t.TempDir()
+	pathA := filepath.Join(dir, "config")
+	pathT := filepath.Join(dir, "trigger")
+
+	// Pre-create the config file so it's converged
+	os.WriteFile(pathA, []byte("existing config"), 0o644)
+
+	planner := NewPlanner()
+	resources := []manifest.ResolvedResource{
+		{
+			Kind: "file", Name: "config",
+			Notify:           []string{"restart"},
+			DeclarationOrder: 0,
+			Spec: map[string]any{"path": pathA, "content": "existing config"},
+		},
+		{
+			Kind: "file", Name: "restart", Trigger: true,
+			DeclarationOrder: 1,
+			Spec: map[string]any{"path": pathT, "content": "restart action"},
+		},
+	}
+
+	plan, err := planner.BuildPlan(resources)
+	if err != nil {
+		t.Fatalf("BuildPlan() error = %v", err)
+	}
+
+	// Config is converged → trigger should NOT fire
+	if plan.Resources[1].Script != "" {
+		t.Fatalf("trigger should not fire when notifier is converged, got script:\n%s", plan.Resources[1].Script)
+	}
+}
+
+func TestTriggerMultipleNotifiersFireOnce(t *testing.T) {
+	dir := t.TempDir()
+	pathA := filepath.Join(dir, "a")
+	pathB := filepath.Join(dir, "b")
+	pathT := filepath.Join(dir, "trigger")
+
+	planner := NewPlanner()
+	resources := []manifest.ResolvedResource{
+		{
+			Kind: "file", Name: "config-a",
+			Notify:           []string{"restart"},
+			DeclarationOrder: 0,
+			Spec: map[string]any{"path": pathA, "content": "a"},
+		},
+		{
+			Kind: "file", Name: "config-b",
+			Notify:           []string{"restart"},
+			DeclarationOrder: 1,
+			Spec: map[string]any{"path": pathB, "content": "b"},
+		},
+		{
+			Kind: "file", Name: "restart", Trigger: true,
+			DeclarationOrder: 2,
+			Spec: map[string]any{"path": pathT, "content": "restarted"},
+		},
+	}
+
+	plan, err := planner.BuildPlan(resources)
+	if err != nil {
+		t.Fatalf("BuildPlan() error = %v", err)
+	}
+
+	// Both notifiers change → trigger fires once (appears once in plan)
+	triggerCount := 0
+	for _, rp := range plan.Resources {
+		if rp.Trigger && rp.Script != "" {
+			triggerCount++
+		}
+	}
+	if triggerCount != 1 {
+		t.Fatalf("trigger should fire exactly once, got %d", triggerCount)
+	}
+}
+
+func TestTriggerApplyChangedOnlyFiring(t *testing.T) {
+	dir := t.TempDir()
+	pathA := filepath.Join(dir, "config")
+	pathT := filepath.Join(dir, "trigger")
+
+	mock := &MockSystem{}
+	planner := NewPlanner()
+	resources := []manifest.ResolvedResource{
+		{
+			Kind: "file", Name: "config",
+			Notify:           []string{"restart"},
+			DeclarationOrder: 0,
+			Spec: map[string]any{"path": pathA, "content": "new config"},
+		},
+		{
+			Kind: "file", Name: "restart", Trigger: true,
+			DeclarationOrder: 1,
+			Spec: map[string]any{"path": pathT, "content": "restart action"},
+		},
+	}
+
+	result, err := planner.Apply(mock, resources, "")
+	if err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+
+	// Config changes → trigger should execute
+	if len(mock.Executed) != 2 {
+		t.Fatalf("executed %d scripts, want 2 (config + trigger)", len(mock.Executed))
+	}
+	if result.Results[0].Status != StatusApplied {
+		t.Errorf("config status = %v, want applied", result.Results[0].Status)
+	}
+	if result.Results[1].Status != StatusApplied {
+		t.Errorf("trigger status = %v, want applied", result.Results[1].Status)
+	}
+}
+
+func TestTriggerApplyConvergedNotifier(t *testing.T) {
+	dir := t.TempDir()
+	pathA := filepath.Join(dir, "config")
+	pathT := filepath.Join(dir, "trigger")
+
+	// Pre-create so config is converged
+	os.WriteFile(pathA, []byte("existing"), 0o644)
+
+	mock := &MockSystem{}
+	planner := NewPlanner()
+	resources := []manifest.ResolvedResource{
+		{
+			Kind: "file", Name: "config",
+			Notify:           []string{"restart"},
+			DeclarationOrder: 0,
+			Spec: map[string]any{"path": pathA, "content": "existing"},
+		},
+		{
+			Kind: "file", Name: "restart", Trigger: true,
+			DeclarationOrder: 1,
+			Spec: map[string]any{"path": pathT, "content": "restart action"},
+		},
+	}
+
+	result, err := planner.Apply(mock, resources, "")
+	if err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+
+	// Config is converged → trigger should NOT execute
+	if len(mock.Executed) != 0 {
+		t.Fatalf("executed %d scripts, want 0 (nothing changed)", len(mock.Executed))
+	}
+	if result.Results[0].Status != StatusConverged {
+		t.Errorf("config status = %v, want converged", result.Results[0].Status)
+	}
+	if result.Results[1].Status != StatusConverged {
+		t.Errorf("trigger status = %v, want converged", result.Results[1].Status)
+	}
+}
+
+func TestValidateNotifyTargetMustBeTrigger(t *testing.T) {
+	dir := t.TempDir()
+	pathA := filepath.Join(dir, "a")
+	pathB := filepath.Join(dir, "b")
+
+	planner := NewPlanner()
+	resources := []manifest.ResolvedResource{
+		{
+			Kind: "file", Name: "config",
+			Notify:           []string{"not-a-trigger"},
+			DeclarationOrder: 0,
+			Spec: map[string]any{"path": pathA, "content": "x"},
+		},
+		{
+			Kind: "file", Name: "not-a-trigger",
+			DeclarationOrder: 1,
+			Spec: map[string]any{"path": pathB, "content": "y"},
+		},
+	}
+
+	err := planner.Validate(resources)
+	if err == nil {
+		t.Fatal("Validate() should reject notify to non-trigger resource")
+	}
+	if !strings.Contains(err.Error(), "not a trigger") {
+		t.Fatalf("error = %q, want 'not a trigger'", err)
+	}
+}
+
+func TestTriggerNeverNotifiedStaysConverged(t *testing.T) {
+	dir := t.TempDir()
+	pathA := filepath.Join(dir, "config")
+	pathT := filepath.Join(dir, "trigger")
+
+	planner := NewPlanner()
+	resources := []manifest.ResolvedResource{
+		{
+			Kind: "file", Name: "config",
+			// No notify edge to the trigger
+			DeclarationOrder: 0,
+			Spec: map[string]any{"path": pathA, "content": "new config"},
+		},
+		{
+			Kind: "file", Name: "unused-trigger", Trigger: true,
+			DeclarationOrder: 1,
+			Spec: map[string]any{"path": pathT, "content": "never fires"},
+		},
+	}
+
+	plan, err := planner.BuildPlan(resources)
+	if err != nil {
+		t.Fatalf("BuildPlan() error = %v", err)
+	}
+
+	// Trigger should not fire even though config has changes (no notify edge)
+	for _, rp := range plan.Resources {
+		if rp.Name == "unused-trigger" && rp.Script != "" {
+			t.Fatalf("unused trigger should not fire, got script:\n%s", rp.Script)
+		}
+	}
+}
+
 func fileResource(name string, dependsOn []string, path string, content string, order int) manifest.ResolvedResource {
 	return manifest.ResolvedResource{
 		Kind:             "file",
