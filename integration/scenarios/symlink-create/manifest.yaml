@@ -1,0 +1,16 @@
+resources:
+  - name: symlink-target-file
+    kind: file
+    spec:
+      path: /tmp/anneal-symlink-target
+      content: "symlink target content"
+      mode: "0644"
+      owner: "root:root"
+
+  - name: test-symlink
+    kind: symlink
+    depends_on:
+      - symlink-target-file
+    spec:
+      path: /tmp/anneal-test-link
+      target: /tmp/anneal-symlink-target

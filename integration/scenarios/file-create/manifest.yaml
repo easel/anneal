@@ -1,0 +1,8 @@
+resources:
+  - name: test-file
+    kind: file
+    spec:
+      path: /tmp/anneal-test-file.txt
+      content: "hello from anneal integration test"
+      mode: "0644"
+      owner: "root:root"

@@ -1,0 +1,12 @@
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY anneal /usr/local/bin/anneal
+COPY integration/run-tests.sh /opt/anneal-test/run-tests.sh
+COPY integration/scenarios /opt/anneal-test/scenarios
+
+WORKDIR /opt/anneal-test
+ENTRYPOINT ["/bin/sh", "/opt/anneal-test/run-tests.sh"]

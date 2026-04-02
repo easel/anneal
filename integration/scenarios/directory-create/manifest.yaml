@@ -1,0 +1,7 @@
+resources:
+  - name: test-directory
+    kind: directory
+    spec:
+      path: /tmp/anneal-test-dir
+      mode: "0755"
+      owner: "root:root"

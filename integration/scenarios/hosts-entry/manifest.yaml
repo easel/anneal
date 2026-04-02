@@ -1,0 +1,8 @@
+resources:
+  - name: test-hosts-entry
+    kind: hosts_entry
+    spec:
+      ip: "192.168.99.1"
+      hostname: "anneal-test-host"
+      aliases:
+        - "ath"

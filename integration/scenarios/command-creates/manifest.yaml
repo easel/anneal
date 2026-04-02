@@ -1,0 +1,6 @@
+resources:
+  - name: test-command
+    kind: command
+    spec:
+      command: "echo 'created by anneal' > /tmp/anneal-cmd-flag"
+      creates: "/tmp/anneal-cmd-flag"

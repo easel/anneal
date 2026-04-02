@@ -1,0 +1,10 @@
+FROM archlinux:latest
+
+RUN pacman -Sy --noconfirm
+
+COPY anneal /usr/local/bin/anneal
+COPY integration/run-tests.sh /opt/anneal-test/run-tests.sh
+COPY integration/scenarios /opt/anneal-test/scenarios
+
+WORKDIR /opt/anneal-test
+ENTRYPOINT ["/bin/sh", "/opt/anneal-test/run-tests.sh"]
