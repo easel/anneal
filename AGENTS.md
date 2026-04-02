@@ -43,12 +43,27 @@ Anneal's built-in providers are validated against two reference deployments:
 - **sahara** (`~/Sync/sahara/`): workstation provisioning — apt, Homebrew,
   language runtimes, editors, Docker, security config
 
-## Testing
+## Build & Test
 
-No tests yet — project is in the Frame/Design phase.
+```bash
+go build -o anneal .           # Build the binary
+go test ./...                  # Run all tests
+go vet ./...                   # Static analysis
+```
 
-When implementation begins:
+### CLI Commands
+
+`anneal validate -f <manifest>` — parse and validate without system access
+`anneal plan -f <manifest>` — build execution plan (stub)
+`anneal apply -f <manifest>` — apply plan (stub)
+`anneal version` — print version
+
+Default manifest path: `anneal.yaml`
+
+### Test Strategy
+
 - Unit tests per provider against mock system interface
-- Config/manifest parsing tests
+- Config/manifest parsing tests (`internal/manifest/`)
+- CLI integration tests (`internal/cli/`)
 - Golden-file plan tests (known input → expected plan output)
-- Integration tests in Docker (Ubuntu 24.04)
+- Docker-based integration tests across Linux distributions

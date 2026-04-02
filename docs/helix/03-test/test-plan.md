@@ -9,8 +9,9 @@ dun:
 
 ## Testing Strategy
 
-Anneal uses a four-tier testing strategy that provides confidence without
-requiring root access or real infrastructure for most tests.
+Anneal uses a five-tier testing strategy that provides confidence without
+requiring real infrastructure for most tests, while still proving the operator
+experience end to end before release.
 
 ### Tier 1: Unit Tests
 
@@ -21,10 +22,15 @@ requiring root access or real infrastructure for most tests.
 Coverage:
 - **Config loader**: YAML parsing, variable resolution, include graph, template
   evaluation, iterator expansion, composite expansion.
+- **Configuration matrix**: table-driven combinations of manifests, includes,
+  variable precedence, optional secrets, run-as-user settings, and fact-driven
+  template branches.
 - **DAG**: topological sort correctness, cycle detection, tiebreaker ordering,
   diamond dependencies.
 - **Provider contract**: each built-in provider's `read`, `diff`, and `emit`
   methods tested against a `MockSystem` interface. No real apt/zfs/docker calls.
+- **Provider matrix**: each provider exercised against representative present /
+  absent / drifted / partially-configured states and error cases.
 - **Stdlib**: each stdlib operation tested for correct command generation.
 - **Secret chain**: env var provider, 1Password provider (mocked CLI), chain
   ordering, missing secrets, optional secrets, auto-generation.
@@ -56,24 +62,38 @@ Golden files catch regressions in:
 ### Tier 3: Provider Integration Tests
 
 **Scope**: built-in providers against real system calls.
-**Environment**: Docker container (Ubuntu 24.04), runs as root.
-**Approach**: each provider is tested end-to-end: read → diff → emit → execute.
+**Environment**: Docker-based Linux distribution matrix, runs as root inside
+test containers.
+**Approach**: each provider is tested end-to-end: read → diff → emit → execute
+across representative OS and configuration combinations.
 
 Test container setup:
-- Clean Ubuntu 24.04 image.
-- No pre-installed optional packages (test that apt_packages works from clean
-  state).
+- Debian / Ubuntu family containers for apt behavior.
+- Fedora / RHEL-like containers for dnf behavior.
+- Arch Linux containers for pacman behavior.
+- A Linux container with Homebrew for brew-specific provider coverage where
+  feasible.
+- No pre-installed optional packages unless the scenario requires them.
 - Writable filesystem (test file providers).
 - Fake systemd (systemd-container or mock).
-- No ZFS, Docker, or Kerberos (those are tier 4).
+- Scenario fixtures covering multiple manifest combinations, not just one happy
+  path per provider.
+- No ZFS, Docker, or Kerberos in the generic matrix (those remain tier 4 or
+  specialized harnesses).
 
 Coverage:
 - `apt_packages`: install, already-installed, purge.
+- `dnf_packages` and `pacman_packages`: install, already-installed, purge /
+  remove semantics.
+- `brew_packages`, `brew_tap`, `npm_packages`, `python_packages`: unprivileged
+  execution, already-installed behavior, and package drift.
 - `file`, `template_file`, `static_file`: write, diff, permissions.
 - `directory`, `symlink`: create, update, already-correct.
 - `user`, `group`, `user_in_group`: create, already-exists.
 - `hosts_entry`: add, update, already-correct.
 - `command`: execute, trigger-only behavior.
+- Module and manifest-composition scenarios: nested includes, host overrides,
+  iterator expansion, and notify / trigger behavior in containerized runs.
 
 ### Tier 4: Reference Deployment Tests
 
@@ -88,6 +108,26 @@ Tests:
 - Add user → `anneal apply` → user, home dir, group membership created.
 
 These tests are expensive and run manually or in CI with VM provisioning.
+
+### Tier 5: Screencast Smoke Proof
+
+**Scope**: operator-visible proof that the core workflow behaves correctly.
+**Environment**: reproducible terminal capture in CI or release verification,
+preferably against a Dockerized baseline for the minimal supported flow.
+**Approach**: record and replay a basic operation screencast that exercises:
+
+1. `anneal validate` on a valid manifest.
+2. `anneal plan` showing the initial diff.
+3. `anneal apply` converging the host.
+4. A second `anneal plan` or `anneal apply` proving idempotency.
+
+Requirements:
+- The screencast asset is versioned or reproducibly generated from repo-owned
+  scripts and fixtures.
+- The smoke scenario uses a small but representative manifest that touches at
+  least one real provider path, not a mocked no-op flow.
+- Release verification fails if the screencast scenario no longer matches the
+  documented operator workflow.
 
 ## Custom Provider Testing
 
@@ -109,3 +149,4 @@ Each user story's acceptance criteria maps to a specific test:
 | "validates at validate time" (error detection) | Tier 1 unit |
 | "works end-to-end" (full lifecycle) | Tier 3 or 4 integration |
 | "readable by a sysadmin" (plan quality) | Manual review + tier 2 |
+| "basic workflow is demonstrably usable" (operator proof) | Tier 5 screencast smoke |

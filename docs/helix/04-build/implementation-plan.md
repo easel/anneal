@@ -36,9 +36,13 @@ for a minimal manifest with one resource kind.
 **Test coverage**:
 - CLI integration tests (validate/plan/apply)
 - Config loader unit tests (YAML, variables, templates)
+- Table-driven manifest/configuration matrix tests for parser and validation
+  behavior
 - DAG tests (sort, cycles, diamonds, tiebreakers)
 - Plan golden-file tests (known input → expected output)
 - Interpreter conformance tests (mvdan/sh basics)
+- A minimal screencast smoke fixture proving validate → plan → apply →
+  idempotent re-apply for the first working manifest
 
 ## Phase 2: File Providers (FEAT-005)
 
@@ -77,6 +81,8 @@ type.
 - `dnf_packages`
 - `brew_packages` (formulae + casks)
 - `npm_packages`, `pip_packages`
+- Docker-matrix integration harness covering package providers across supported
+  Linux distribution families and representative package scenarios
 
 ## Phase 5: User, Service, Network Providers (FEAT-004, FEAT-006, FEAT-009)
 
@@ -135,13 +141,15 @@ type.
 - Template migration from envsubst to text/template
 - Side-by-side validation against existing shell scripts
 - Documentation: getting started guide, provider reference
+- Reproducible screencast and smoke-test script for the documented operator
+  workflow
 
 ## Validation Milestones
 
 | After Phase | Validation |
 |-------------|-----------|
-| 1 | `anneal plan` produces a valid plan for a single-file manifest |
-| 3 | `anneal plan` works for a multi-file manifest with includes and iterators |
-| 5 | The sahara workstation manifest covers packages, users, files, services |
-| 7 | The timbuktu server manifest covers ZFS, Kerberos, NFS, Samba, Docker |
-| 9 | Both reference deployments converge from fresh OS install |
+| 1 | `anneal plan` produces a valid plan for a single-file manifest and the screencast smoke fixture proves the basic workflow |
+| 3 | `anneal plan` works for a multi-file manifest with includes and iterators, covered by unit and golden tests |
+| 5 | The sahara workstation manifest covers packages, users, files, services, and provider integration passes in the Docker OS matrix |
+| 7 | The timbuktu server manifest covers ZFS, Kerberos, NFS, Samba, Docker, with specialized integration proof where Docker-only coverage is insufficient |
+| 9 | Both reference deployments converge from fresh OS install and the release screencast smoke proof passes |

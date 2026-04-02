@@ -134,6 +134,12 @@ tools are overkill
 17. **Built-in template variables.** Manifests and templates have access to
     system-derived variables: hostname, FQDN, architecture (Go, Debian, and
     kernel naming conventions), and OS version.
+18. **Proof-oriented verification.** The project must ship with robust unit
+    tests, golden plan tests, and Docker-based integration coverage across the
+    supported Linux distribution matrix and representative configuration
+    combinations. Release verification must also include a recorded basic
+    operation screencast that proves the validate → plan → apply → re-apply
+    flow and is exercised as a smoke test.
 
 ### Should Have (P1)
 
@@ -233,3 +239,5 @@ tools are overkill
   someone familiar with shell scripting.
 - `anneal plan` completes in under 5 seconds for the reference deployment.
 - `anneal apply` on a converged system completes in seconds with zero changes.
+- CI or release verification proves the core workflow with a reproducible
+  screencast smoke run covering validate, plan, apply, and idempotent re-apply.
