@@ -78,6 +78,11 @@ tools are overkill
 **Goals**: Terraform-like workflow for machines alongside cloud infrastructure
 **Pain Points**: No equivalent of `terraform plan` for the machines themselves
 
+### Tertiary Persona: AI Agent
+**Role**: Coding assistant or agent loop (Claude Code, OpenCode, Codex) acting on behalf of an operator
+**Goals**: Configure hosts as part of a larger task without understanding YAML, provider internals, or config file layouts
+**Pain Points**: Existing CM tools require authoring config files in domain-specific formats; agents waste tokens swimming in YAML schemas and provider docs instead of expressing intent
+
 ## Requirements
 
 ### Must Have (P0)
@@ -176,6 +181,22 @@ tools are overkill
 13. **Conditional resources.** A `when:` clause on resources for conditional
     inclusion based on facts or variables, beyond what template `{{ if }}`
     blocks can express.
+14. **Agentic tool interface.** A structured CLI surface optimized for AI agent
+    loops. Agents describe intent ("install spark on myhost") and anneal
+    resolves providers, generates manifest fragments, validates them, and
+    produces a reviewable plan. Specific capabilities:
+    - `anneal providers` — list available providers with structured metadata
+      (JSON output) so agents can discover what anneal can manage.
+    - `anneal generate` — accept a high-level goal or structured resource
+      description and emit a valid manifest fragment. Agents compose these
+      fragments with existing manifests without understanding YAML conventions.
+    - `anneal plan --json` — structured plan output with per-resource status,
+      diffs, and metadata for agent consumption (human-readable plan remains
+      the default).
+    - `anneal validate --json` — structured validation output with errors and
+      warnings as machine-parseable records.
+    - All commands support `--json` for structured output that agents can parse
+      without scraping text.
 
 ### Nice to Have (P2)
 

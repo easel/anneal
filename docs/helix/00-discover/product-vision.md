@@ -31,6 +31,11 @@ install Ansible or run a Puppet server.
 servers alongside cloud infrastructure. Already uses Terraform for cloud but has
 nothing equivalent for the machines themselves.
 
+**Tertiary — AI agents acting on behalf of operators.** Coding assistants and
+agent loops (Claude Code, OpenCode, Codex) that need to configure hosts as part
+of a larger task. The agent doesn't know YAML or provider internals — it
+describes intent and anneal resolves the how.
+
 ## Positioning
 
 ### What Anneal Is Not
@@ -76,3 +81,7 @@ nothing equivalent for the machines themselves.
 9. **Secrets stay in the vault.** Referenced by name, never stored in manifests,
    never shown in plans. Environment variables and 1Password built in; custom
    secret providers via shell scripts.
+10. **Agent-native interface.** Anneal is a tool agents reach for — the same way
+    they reach for a compiler to build code. Structured CLI commands let agents
+    discover providers, generate manifests from intent, and preview plans
+    without authoring YAML or understanding provider internals.
