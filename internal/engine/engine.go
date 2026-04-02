@@ -154,6 +154,10 @@ func NewPlanner() *Planner {
 			"systemd_service":  systemdServiceProvider{},
 			"systemd_unit":      systemdUnitProvider{},
 			"docker_container":  dockerContainerProvider{},
+			"hosts_entry":       hostsEntryProvider{},
+			"crypttab_entry":    crypttabEntryProvider{},
+			"binary_install":    binaryInstallProvider{},
+			"command":           commandProvider{},
 		},
 	}
 }

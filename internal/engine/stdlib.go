@@ -182,4 +182,53 @@ stdlib_docker_health_check() {
   echo "health check failed: $_url did not respond within ${_timeout}s" >&2
   return 1
 }
+
+stdlib_hosts_entry() {
+  _file="$1"; _hostname="$2"; _line="$3"
+  if [ -f "$_file" ]; then
+    _tmp="$(mktemp)"
+    grep -v "[ 	]${_hostname}\([ 	]\|$\)" "$_file" > "$_tmp" || true
+    cat "$_tmp" > "$_file"
+    rm -f "$_tmp"
+  fi
+  printf '%s\n' "$_line" >> "$_file"
+}
+
+stdlib_crypttab_entry() {
+  _file="$1"; _name="$2"; _line="$3"
+  if [ -f "$_file" ]; then
+    _tmp="$(mktemp)"
+    grep -v "^${_name}[ 	]" "$_file" > "$_tmp" || true
+    cat "$_tmp" > "$_file"
+    rm -f "$_tmp"
+  fi
+  printf '%s\n' "$_line" >> "$_file"
+}
+
+stdlib_binary_install() {
+  _url="$1"; _path="$2"; _mode="$3"; _checksum="$4"
+  _tmp="$(mktemp)"
+  curl -fsSL -o "$_tmp" "$_url"
+  if [ -n "$_checksum" ]; then
+    _algo="${_checksum%%:*}"
+    _expected="${_checksum#*:}"
+    _actual="$(${_algo}sum "$_tmp" | awk '{print $1}')"
+    if [ "$_actual" != "$_expected" ]; then
+      rm -f "$_tmp"
+      echo "checksum mismatch: expected $_expected got $_actual" >&2
+      return 1
+    fi
+  fi
+  _dir="$(dirname "$_path")"
+  [ -d "$_dir" ] || mkdir -p "$_dir"
+  mv "$_tmp" "$_path"
+  chmod "$_mode" "$_path"
+}
+
+stdlib_command_creates() {
+  _creates="$1"; _command="$2"
+  if [ ! -e "$_creates" ]; then
+    eval "$_command"
+  fi
+}
 `
