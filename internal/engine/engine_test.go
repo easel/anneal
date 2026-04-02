@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -121,6 +122,158 @@ func TestPlannerBuildShellQuotesPathModeOwner(t *testing.T) {
 	// Owner with apostrophe must be safely quoted
 	if !strings.Contains(plan, `'user'\''s:group'`) {
 		t.Fatalf("owner not properly quoted in plan:\n%s", plan)
+	}
+}
+
+func TestApplyExecutesResourcesInOrder(t *testing.T) {
+	dir := t.TempDir()
+	pathA := filepath.Join(dir, "a")
+	pathB := filepath.Join(dir, "b")
+
+	mock := &MockSystem{}
+	planner := NewPlanner()
+	resources := []manifest.ResolvedResource{
+		fileResource("a", nil, pathA, "content-a", 0),
+		fileResource("b", []string{"a"}, pathB, "content-b", 1),
+	}
+
+	result, err := planner.Apply(mock, resources, "")
+	if err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	if result.Failed() {
+		t.Fatalf("Apply() failed:\n%s", result.Summary())
+	}
+	if len(mock.Executed) != 2 {
+		t.Fatalf("executed %d scripts, want 2", len(mock.Executed))
+	}
+	if !strings.Contains(mock.Executed[0], pathA) {
+		t.Fatalf("first script should reference %s, got:\n%s", pathA, mock.Executed[0])
+	}
+	if !strings.Contains(mock.Executed[1], pathB) {
+		t.Fatalf("second script should reference %s, got:\n%s", pathB, mock.Executed[1])
+	}
+	// Check result statuses
+	if result.Results[0].Status != StatusApplied || result.Results[1].Status != StatusApplied {
+		t.Fatalf("expected both applied:\n%s", result.Summary())
+	}
+}
+
+func TestApplyFailStopSkipsRemaining(t *testing.T) {
+	dir := t.TempDir()
+	pathA := filepath.Join(dir, "a")
+	pathB := filepath.Join(dir, "b")
+	pathC := filepath.Join(dir, "c")
+
+	mock := &MockSystem{
+		FailOn: map[string]error{
+			pathB: fmt.Errorf("permission denied"),
+		},
+	}
+	planner := NewPlanner()
+	resources := []manifest.ResolvedResource{
+		fileResource("a", nil, pathA, "a", 0),
+		fileResource("b", nil, pathB, "b", 1),
+		fileResource("c", nil, pathC, "c", 2),
+	}
+
+	result, err := planner.Apply(mock, resources, "")
+	if err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	if !result.Failed() {
+		t.Fatal("Apply() should have failed")
+	}
+
+	if result.Results[0].Status != StatusApplied {
+		t.Fatalf("resource a: status = %v, want applied", result.Results[0].Status)
+	}
+	if result.Results[1].Status != StatusFailed {
+		t.Fatalf("resource b: status = %v, want failed", result.Results[1].Status)
+	}
+	if result.Results[2].Status != StatusSkipped {
+		t.Fatalf("resource c: status = %v, want skipped", result.Results[2].Status)
+	}
+
+	summary := result.Summary()
+	if !strings.Contains(summary, "FAILED: b") {
+		t.Fatalf("summary missing failure info:\n%s", summary)
+	}
+	if !strings.Contains(summary, "skipped: c") {
+		t.Fatalf("summary missing skip info:\n%s", summary)
+	}
+}
+
+func TestApplyConvergedResourcesAreTracked(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "motd")
+	os.WriteFile(path, []byte("hello"), 0o644)
+
+	mock := &MockSystem{}
+	planner := NewPlanner()
+	resources := []manifest.ResolvedResource{
+		fileResource("motd", nil, path, "hello", 0),
+	}
+
+	result, err := planner.Apply(mock, resources, "")
+	if err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	if result.Failed() {
+		t.Fatalf("Apply() failed:\n%s", result.Summary())
+	}
+	if len(mock.Executed) != 0 {
+		t.Fatalf("executed %d scripts, want 0 (already converged)", len(mock.Executed))
+	}
+	if result.Results[0].Status != StatusConverged {
+		t.Fatalf("status = %v, want converged", result.Results[0].Status)
+	}
+}
+
+func TestApplyDriftDetectionAborts(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "motd")
+
+	mock := &MockSystem{}
+	planner := NewPlanner()
+	resources := []manifest.ResolvedResource{
+		fileResource("motd", nil, path, "hello", 0),
+	}
+
+	// Save a plan that doesn't match current state
+	savedScript := "#!/bin/sh\nset -e\n\necho different plan\n"
+
+	_, err := planner.Apply(mock, resources, savedScript)
+	if err == nil {
+		t.Fatal("Apply() should fail on drift")
+	}
+	if !strings.Contains(err.Error(), "plan drift detected") {
+		t.Fatalf("Apply() error = %q, want drift detection", err)
+	}
+	if len(mock.Executed) != 0 {
+		t.Fatal("drift detection should prevent any execution")
+	}
+}
+
+func TestApplyDriftDetectionPassesOnMatch(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "motd")
+
+	mock := &MockSystem{}
+	planner := NewPlanner()
+	resources := []manifest.ResolvedResource{
+		fileResource("motd", nil, path, "hello", 0),
+	}
+
+	// Build the actual plan script, then apply with it as saved
+	plan, _ := planner.Build(resources)
+
+	result, err := planner.Apply(mock, resources, plan)
+	if err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+	if result.Failed() {
+		t.Fatalf("Apply() failed:\n%s", result.Summary())
 	}
 }
 

@@ -10,6 +10,112 @@ import (
 	"github.com/easel/anneal/internal/manifest"
 )
 
+// ResourcePlan holds the planned operations for a single resource.
+type ResourcePlan struct {
+	Name   string
+	Kind   string
+	Script string // Shell fragment for this resource (empty = already converged)
+}
+
+// Plan holds the full execution plan with per-resource breakdown.
+type Plan struct {
+	Resources []ResourcePlan
+}
+
+// Script returns the full plan as an executable shell script.
+// Returns empty string if no resources need changes.
+func (p *Plan) Script() string {
+	var ops []string
+	for _, rp := range p.Resources {
+		if rp.Script != "" {
+			ops = append(ops, rp.Script)
+		}
+	}
+	if len(ops) == 0 {
+		return ""
+	}
+
+	var buf bytes.Buffer
+	buf.WriteString("#!/bin/sh\n")
+	buf.WriteString("set -e\n\n")
+	for idx, op := range ops {
+		if idx > 0 {
+			buf.WriteByte('\n')
+		}
+		buf.WriteString(op)
+		if !strings.HasSuffix(op, "\n") {
+			buf.WriteByte('\n')
+		}
+	}
+	return buf.String()
+}
+
+// ResourceStatus describes what happened to a resource during apply.
+type ResourceStatus int
+
+const (
+	StatusApplied ResourceStatus = iota
+	StatusFailed
+	StatusSkipped
+	StatusConverged // Already in desired state, no action taken
+)
+
+func (s ResourceStatus) String() string {
+	switch s {
+	case StatusApplied:
+		return "applied"
+	case StatusFailed:
+		return "failed"
+	case StatusSkipped:
+		return "skipped"
+	case StatusConverged:
+		return "converged"
+	default:
+		return "unknown"
+	}
+}
+
+// ResourceResult records the outcome of applying one resource.
+type ResourceResult struct {
+	Name   string
+	Kind   string
+	Status ResourceStatus
+	Error  error
+}
+
+// ApplyResult holds the outcome of a full apply run.
+type ApplyResult struct {
+	Results []ResourceResult
+}
+
+// Summary returns a human-readable fail-stop summary.
+func (ar *ApplyResult) Summary() string {
+	var buf bytes.Buffer
+	for _, r := range ar.Results {
+		switch r.Status {
+		case StatusApplied:
+			fmt.Fprintf(&buf, "  applied: %s (%s)\n", r.Name, r.Kind)
+		case StatusConverged:
+			fmt.Fprintf(&buf, "  converged: %s (%s)\n", r.Name, r.Kind)
+		case StatusFailed:
+			fmt.Fprintf(&buf, "  FAILED: %s (%s): %v\n", r.Name, r.Kind, r.Error)
+		case StatusSkipped:
+			fmt.Fprintf(&buf, "  skipped: %s (%s)\n", r.Name, r.Kind)
+		}
+	}
+	return buf.String()
+}
+
+// Failed returns true if any resource failed.
+func (ar *ApplyResult) Failed() bool {
+	for _, r := range ar.Results {
+		if r.Status == StatusFailed {
+			return true
+		}
+	}
+	return false
+}
+
 type Planner struct {
 	providers map[string]Provider
 }
@@ -38,41 +144,98 @@ func (p *Planner) Validate(resources []manifest.ResolvedResource) error {
 	return nil
 }
 
-func (p *Planner) Build(resources []manifest.ResolvedResource) (string, error) {
+// BuildPlan produces a structured plan with per-resource operations.
+func (p *Planner) BuildPlan(resources []manifest.ResolvedResource) (*Plan, error) {
 	ordered, err := topoSort(resources)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	var ops []string
+	plan := &Plan{}
 	for _, resource := range ordered {
 		provider, ok := p.providers[resource.Kind]
 		if !ok {
-			return "", fmt.Errorf("resource %s: unknown kind %q", resource.Name, resource.Kind)
+			return nil, fmt.Errorf("resource %s: unknown kind %q", resource.Name, resource.Kind)
 		}
-		resourceOps, err := provider.Plan(resource)
+		ops, err := provider.Plan(resource)
 		if err != nil {
-			return "", fmt.Errorf("resource %s: %w", resource.Name, err)
+			return nil, fmt.Errorf("resource %s: %w", resource.Name, err)
 		}
-		ops = append(ops, resourceOps...)
+		var script string
+		if len(ops) > 0 {
+			script = strings.Join(ops, "\n")
+		}
+		plan.Resources = append(plan.Resources, ResourcePlan{
+			Name:   resource.Name,
+			Kind:   resource.Kind,
+			Script: script,
+		})
 	}
-	if len(ops) == 0 {
-		return "", nil
+	return plan, nil
+}
+
+// Build returns the plan as a monolithic shell script (backward compatible).
+func (p *Planner) Build(resources []manifest.ResolvedResource) (string, error) {
+	plan, err := p.BuildPlan(resources)
+	if err != nil {
+		return "", err
+	}
+	return plan.Script(), nil
+}
+
+// Apply executes a plan resource-by-resource with fail-stop semantics.
+// If savedScript is non-empty, it re-plans and compares the script output
+// against the saved version to detect drift before executing.
+func (p *Planner) Apply(sys System, resources []manifest.ResolvedResource, savedScript string) (*ApplyResult, error) {
+	currentPlan, err := p.BuildPlan(resources)
+	if err != nil {
+		return nil, fmt.Errorf("re-plan failed: %w", err)
 	}
 
-	var buf bytes.Buffer
-	buf.WriteString("#!/bin/sh\n")
-	buf.WriteString("set -e\n\n")
-	for idx, op := range ops {
-		if idx > 0 {
-			buf.WriteByte('\n')
-		}
-		buf.WriteString(op)
-		if !strings.HasSuffix(op, "\n") {
-			buf.WriteByte('\n')
+	if savedScript != "" {
+		currentScript := currentPlan.Script()
+		if currentScript != savedScript {
+			return nil, fmt.Errorf("plan drift detected: system state changed since plan was saved")
 		}
 	}
-	return buf.String(), nil
+
+	result := &ApplyResult{}
+	failed := false
+	for _, rp := range currentPlan.Resources {
+		if failed {
+			result.Results = append(result.Results, ResourceResult{
+				Name:   rp.Name,
+				Kind:   rp.Kind,
+				Status: StatusSkipped,
+			})
+			continue
+		}
+		if rp.Script == "" {
+			result.Results = append(result.Results, ResourceResult{
+				Name:   rp.Name,
+				Kind:   rp.Kind,
+				Status: StatusConverged,
+			})
+			continue
+		}
+		_, execErr := sys.Execute(rp.Script)
+		if execErr != nil {
+			failed = true
+			result.Results = append(result.Results, ResourceResult{
+				Name:   rp.Name,
+				Kind:   rp.Kind,
+				Status: StatusFailed,
+				Error:  execErr,
+			})
+		} else {
+			result.Results = append(result.Results, ResourceResult{
+				Name:   rp.Name,
+				Kind:   rp.Kind,
+				Status: StatusApplied,
+			})
+		}
+	}
+	return result, nil
 }
 
 type fileProvider struct{}

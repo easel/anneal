@@ -140,20 +140,55 @@ func newPlanCmd(opts *options) *cobra.Command {
 }
 
 func newApplyCmd(opts *options) *cobra.Command {
-	return &cobra.Command{
+	var planFile string
+	cmd := &cobra.Command{
 		Use:   "apply",
-		Short: "Apply a previously generated plan",
+		Short: "Apply the manifest, converging the system to desired state",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if _, err := manifest.Load(opts.manifestPath); err != nil {
+			resolved, err := manifest.LoadResolved(opts.manifestPath, manifest.ResolveOptions{
+				Env:      currentEnv(),
+				Builtins: manifest.CurrentBuiltins(),
+			})
+			if err != nil {
 				return err
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), "apply command is not implemented yet")
-			return &exitError{
-				code: ExitCodeUnimplemented,
-				err:  errors.New("apply pipeline not implemented"),
+			planner := engine.NewPlanner()
+
+			var savedScript string
+			if planFile != "" {
+				savedScript, err = loadSavedPlan(planFile)
+				if err != nil {
+					return err
+				}
 			}
+
+			result, err := planner.Apply(engine.EmbeddedShell{}, resolved.Resources, savedScript)
+			if err != nil {
+				return err
+			}
+
+			fmt.Fprint(cmd.OutOrStdout(), result.Summary())
+			if result.Failed() {
+				return &exitError{
+					code: ExitCodeRuntimeError,
+					err:  errors.New("apply failed"),
+				}
+			}
+			return nil
 		},
 	}
+	cmd.Flags().StringVar(&planFile, "plan", "", "Path to a saved plan file for drift detection")
+	return cmd
+}
+
+// loadSavedPlan reads a saved plan script file. Apply will re-plan and
+// compare the script output against this to detect drift.
+func loadSavedPlan(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read saved plan: %w", err)
+	}
+	return string(data), nil
 }
 
 func newVersionCmd(version string) *cobra.Command {

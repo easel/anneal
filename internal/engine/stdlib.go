@@ -1,0 +1,15 @@
+package engine
+
+// stdlibPreamble defines shell functions that plan scripts call.
+// These are prepended to every script before execution.
+const stdlibPreamble = `
+stdlib_file_write() {
+  _path="$1"; _mode="$2"; _owner="$3"
+  _content="$(cat)"
+  _dir="$(dirname "$_path")"
+  [ -d "$_dir" ] || mkdir -p "$_dir"
+  printf '%s' "$_content" > "$_path"
+  chmod "$_mode" "$_path"
+  chown "$_owner" "$_path" 2>/dev/null || true
+}
+`
