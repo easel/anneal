@@ -138,6 +138,8 @@ func NewPlanner() *Planner {
 			"directory":     directoryProvider{},
 			"symlink":       symlinkProvider{},
 			"file_absent":   fileAbsentProvider{},
+			"apt_packages":  aptPackagesProvider{},
+			"apt_purge":     aptPurgeProvider{},
 		},
 	}
 }

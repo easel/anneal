@@ -40,4 +40,16 @@ stdlib_file_remove() {
   _path="$1"
   rm -f "$_path"
 }
+
+stdlib_apt_install() {
+  DEBIAN_FRONTEND=noninteractive apt-get install -y "$@"
+}
+
+stdlib_apt_purge() {
+  DEBIAN_FRONTEND=noninteractive apt-get purge -y "$@"
+}
+
+stdlib_debconf_set() {
+  echo "$@" | debconf-set-selections
+}
 `
