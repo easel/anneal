@@ -160,6 +160,9 @@ func NewPlanner() *Planner {
 			"command":           commandProvider{},
 			"zfs_dataset":       zfsDatasetProvider{},
 			"zfs_properties":    zfsPropertiesProvider{},
+			"kerberos_kdc":       kerberosKDCProvider{},
+			"kerberos_principal": kerberosPrincipalProvider{},
+			"kerberos_keytab":    kerberosKeytabProvider{},
 		},
 	}
 }
