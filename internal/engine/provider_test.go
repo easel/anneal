@@ -1001,6 +1001,268 @@ func TestFileAbsentProviderStateMatrix(t *testing.T) {
 	}
 }
 
+// TestFileProviderModeDrift verifies that matching content with wrong mode
+// emits a chmod operation without rewriting the file.
+func TestFileProviderModeDrift(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "target")
+	os.WriteFile(path, []byte("hello"), 0o644)
+
+	provider := fileProvider{}
+	ops, err := provider.Plan(manifest.ResolvedResource{
+		Kind: "file",
+		Name: "test",
+		Spec: map[string]any{
+			"path":    path,
+			"content": "hello",
+			"mode":    "0600",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if len(ops) == 0 {
+		t.Fatal("expected chmod operation for mode drift, got none")
+	}
+	joined := strings.Join(ops, "\n")
+	if !strings.Contains(joined, "chmod") {
+		t.Fatalf("expected chmod in ops, got:\n%s", joined)
+	}
+	if !strings.Contains(joined, "'0600'") {
+		t.Fatalf("expected target mode 0600 in ops, got:\n%s", joined)
+	}
+	// Should NOT rewrite content
+	if strings.Contains(joined, "stdlib_file_write") {
+		t.Fatalf("mode-only drift should not trigger file rewrite, got:\n%s", joined)
+	}
+	// Should show mode change comment
+	if !strings.Contains(joined, "# mode:") {
+		t.Fatalf("expected mode change comment, got:\n%s", joined)
+	}
+}
+
+// TestFileProviderContentDriftComment verifies plan diff comments for content changes.
+func TestFileProviderContentDriftComment(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "target")
+
+	// Test new file comment
+	provider := fileProvider{}
+	ops, err := provider.Plan(manifest.ResolvedResource{
+		Kind: "file",
+		Name: "test",
+		Spec: map[string]any{
+			"path":    path,
+			"content": "new content",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	joined := strings.Join(ops, "\n")
+	if !strings.Contains(joined, "# new file") {
+		t.Fatalf("expected '# new file' comment for absent file, got:\n%s", joined)
+	}
+
+	// Test content changed comment
+	os.WriteFile(path, []byte("old content"), 0o644)
+	ops, err = provider.Plan(manifest.ResolvedResource{
+		Kind: "file",
+		Name: "test",
+		Spec: map[string]any{
+			"path":    path,
+			"content": "new content",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	joined = strings.Join(ops, "\n")
+	if !strings.Contains(joined, "# content changed") {
+		t.Fatalf("expected '# content changed' comment for drift, got:\n%s", joined)
+	}
+}
+
+// TestDirectoryProviderModeDriftComment verifies directory mode drift includes comment.
+func TestDirectoryProviderModeDriftComment(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "testdir")
+	os.Mkdir(path, 0o755)
+
+	provider := directoryProvider{}
+	ops, err := provider.Plan(manifest.ResolvedResource{
+		Kind: "directory",
+		Name: "test",
+		Spec: map[string]any{
+			"path": path,
+			"mode": "0700",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	joined := strings.Join(ops, "\n")
+	if !strings.Contains(joined, "# mode:") {
+		t.Fatalf("expected mode change comment, got:\n%s", joined)
+	}
+	if !strings.Contains(joined, "chmod") {
+		t.Fatalf("expected chmod in ops, got:\n%s", joined)
+	}
+}
+
+// TestDirectoryProviderNewDirComment verifies new directory has comment.
+func TestDirectoryProviderNewDirComment(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "newdir")
+
+	provider := directoryProvider{}
+	ops, err := provider.Plan(manifest.ResolvedResource{
+		Kind: "directory",
+		Name: "test",
+		Spec: map[string]any{
+			"path": path,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	joined := strings.Join(ops, "\n")
+	if !strings.Contains(joined, "# new directory") {
+		t.Fatalf("expected '# new directory' comment, got:\n%s", joined)
+	}
+}
+
+// TestStaticFileProviderModeDrift verifies static_file mode drift emits chmod.
+func TestStaticFileProviderModeDrift(t *testing.T) {
+	dir := t.TempDir()
+	srcPath := filepath.Join(dir, "source")
+	destPath := filepath.Join(dir, "target")
+	os.WriteFile(srcPath, []byte("static"), 0o644)
+	os.WriteFile(destPath, []byte("static"), 0o644)
+
+	provider := staticFileProvider{}
+	ops, err := provider.Plan(manifest.ResolvedResource{
+		Kind: "static_file",
+		Name: "test",
+		Spec: map[string]any{
+			"source": srcPath,
+			"path":   destPath,
+			"mode":   "0600",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if len(ops) == 0 {
+		t.Fatal("expected chmod operation for mode drift, got none")
+	}
+	joined := strings.Join(ops, "\n")
+	if !strings.Contains(joined, "chmod") {
+		t.Fatalf("expected chmod in ops, got:\n%s", joined)
+	}
+	if strings.Contains(joined, "stdlib_file_write") {
+		t.Fatalf("mode-only drift should not trigger file rewrite, got:\n%s", joined)
+	}
+}
+
+// TestFileCopyProviderModeDrift verifies file_copy mode drift emits chmod.
+func TestFileCopyProviderModeDrift(t *testing.T) {
+	dir := t.TempDir()
+	srcPath := filepath.Join(dir, "source")
+	destPath := filepath.Join(dir, "target")
+	os.WriteFile(srcPath, []byte("data"), 0o644)
+	os.WriteFile(destPath, []byte("data"), 0o644)
+
+	provider := fileCopyProvider{}
+	ops, err := provider.Plan(manifest.ResolvedResource{
+		Kind: "file_copy",
+		Name: "test",
+		Spec: map[string]any{
+			"source": srcPath,
+			"path":   destPath,
+			"mode":   "0600",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if len(ops) == 0 {
+		t.Fatal("expected chmod operation for mode drift, got none")
+	}
+	joined := strings.Join(ops, "\n")
+	if !strings.Contains(joined, "chmod") {
+		t.Fatalf("expected chmod in ops, got:\n%s", joined)
+	}
+	if strings.Contains(joined, "stdlib_file_copy") {
+		t.Fatalf("mode-only drift should not trigger file copy, got:\n%s", joined)
+	}
+}
+
+// TestTemplateFileProviderModeDrift verifies template_file mode drift emits chmod.
+func TestTemplateFileProviderModeDrift(t *testing.T) {
+	dir := t.TempDir()
+	srcPath := filepath.Join(dir, "template.tmpl")
+	destPath := filepath.Join(dir, "target")
+	os.WriteFile(srcPath, []byte("Hello {{ .name }}!"), 0o644)
+	os.WriteFile(destPath, []byte("Hello world!"), 0o644)
+
+	provider := templateFileProvider{}
+	ops, err := provider.Plan(manifest.ResolvedResource{
+		Kind: "template_file",
+		Name: "test",
+		Spec: map[string]any{
+			"source": srcPath,
+			"path":   destPath,
+			"mode":   "0600",
+		},
+		Vars: map[string]any{"name": "world"},
+	})
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if len(ops) == 0 {
+		t.Fatal("expected chmod operation for mode drift, got none")
+	}
+	joined := strings.Join(ops, "\n")
+	if !strings.Contains(joined, "chmod") {
+		t.Fatalf("expected chmod in ops, got:\n%s", joined)
+	}
+	if strings.Contains(joined, "stdlib_file_write") {
+		t.Fatalf("mode-only drift should not trigger file rewrite, got:\n%s", joined)
+	}
+}
+
+// TestMetadataOpsHelper verifies the metadataOps helper directly.
+func TestMetadataOpsHelper(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "testfile")
+	os.WriteFile(path, []byte("x"), 0o644)
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Mode matches — no ops
+	ops := metadataOps(path, info, "0644", "root:root")
+	if len(ops) != 0 {
+		t.Fatalf("expected no ops for matching mode (non-root), got: %v", ops)
+	}
+
+	// Mode differs — chmod emitted
+	ops = metadataOps(path, info, "0700", "root:root")
+	if len(ops) == 0 {
+		t.Fatal("expected chmod op for mode drift")
+	}
+	joined := strings.Join(ops, "\n")
+	if !strings.Contains(joined, "chmod") {
+		t.Fatalf("expected chmod, got:\n%s", joined)
+	}
+	if !strings.Contains(joined, "# mode: 0644") {
+		t.Fatalf("expected mode comment, got:\n%s", joined)
+	}
+}
+
 func TestFileAbsentProviderMultipleGlobOps(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "a.tmp"), []byte("x"), 0o644)

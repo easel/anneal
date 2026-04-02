@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 
 	"github.com/easel/anneal/internal/manifest"
 )
@@ -256,13 +258,6 @@ func (fileProvider) Plan(resource manifest.ResolvedResource) ([]string, error) {
 	if !ok {
 		return nil, fmt.Errorf("file spec.content is required")
 	}
-	current, err := os.ReadFile(path)
-	if err == nil && string(current) == content {
-		return nil, nil
-	}
-	if err != nil && !os.IsNotExist(err) {
-		return nil, err
-	}
 
 	mode := "0644"
 	if rawMode, ok := resource.Spec["mode"].(string); ok && rawMode != "" {
@@ -272,10 +267,29 @@ func (fileProvider) Plan(resource manifest.ResolvedResource) ([]string, error) {
 	if rawOwner, ok := resource.Spec["owner"].(string); ok && rawOwner != "" {
 		owner = rawOwner
 	}
+
+	current, err := os.ReadFile(path)
+	if err == nil && string(current) == content {
+		// Content matches — check metadata drift only.
+		info, statErr := os.Stat(path)
+		if statErr != nil {
+			return nil, statErr
+		}
+		return metadataOps(path, info, mode, owner), nil
+	}
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+
+	var ops []string
+	if err != nil {
+		ops = append(ops, "# new file")
+	} else {
+		ops = append(ops, "# content changed")
+	}
 	delim := uniqueHeredocDelimiter(content)
-	return []string{
-		fmt.Sprintf("stdlib_file_write %s %s %s <<'%s'\n%s\n%s", shellQuote(path), shellQuote(mode), shellQuote(owner), delim, content, delim),
-	}, nil
+	ops = append(ops, fmt.Sprintf("stdlib_file_write %s %s %s <<'%s'\n%s\n%s", shellQuote(path), shellQuote(mode), shellQuote(owner), delim, content, delim))
+	return ops, nil
 }
 
 // templateFileProvider renders a Go template source file with manifest variables
@@ -302,14 +316,6 @@ func (templateFileProvider) Plan(resource manifest.ResolvedResource) ([]string, 
 		return nil, fmt.Errorf("template_file: rendering %s: %w", source, err)
 	}
 
-	current, err := os.ReadFile(path)
-	if err == nil && string(current) == rendered {
-		return nil, nil
-	}
-	if err != nil && !os.IsNotExist(err) {
-		return nil, err
-	}
-
 	mode := "0644"
 	if rawMode, ok := resource.Spec["mode"].(string); ok && rawMode != "" {
 		mode = rawMode
@@ -318,10 +324,29 @@ func (templateFileProvider) Plan(resource manifest.ResolvedResource) ([]string, 
 	if rawOwner, ok := resource.Spec["owner"].(string); ok && rawOwner != "" {
 		owner = rawOwner
 	}
+
+	current, err := os.ReadFile(path)
+	if err == nil && string(current) == rendered {
+		// Content matches — check metadata drift only.
+		info, statErr := os.Stat(path)
+		if statErr != nil {
+			return nil, statErr
+		}
+		return metadataOps(path, info, mode, owner), nil
+	}
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+
+	var ops []string
+	if err != nil {
+		ops = append(ops, "# new file")
+	} else {
+		ops = append(ops, "# content changed")
+	}
 	delim := uniqueHeredocDelimiter(rendered)
-	return []string{
-		fmt.Sprintf("stdlib_file_write %s %s %s <<'%s'\n%s\n%s", shellQuote(path), shellQuote(mode), shellQuote(owner), delim, rendered, delim),
-	}, nil
+	ops = append(ops, fmt.Sprintf("stdlib_file_write %s %s %s <<'%s'\n%s\n%s", shellQuote(path), shellQuote(mode), shellQuote(owner), delim, rendered, delim))
+	return ops, nil
 }
 
 // staticFileProvider copies a source file verbatim — no template processing.
@@ -342,14 +367,6 @@ func (staticFileProvider) Plan(resource manifest.ResolvedResource) ([]string, er
 		return nil, fmt.Errorf("static_file: reading source %s: %w", source, err)
 	}
 
-	current, err := os.ReadFile(path)
-	if err == nil && string(current) == string(srcContent) {
-		return nil, nil
-	}
-	if err != nil && !os.IsNotExist(err) {
-		return nil, err
-	}
-
 	mode := "0644"
 	if rawMode, ok := resource.Spec["mode"].(string); ok && rawMode != "" {
 		mode = rawMode
@@ -358,11 +375,30 @@ func (staticFileProvider) Plan(resource manifest.ResolvedResource) ([]string, er
 	if rawOwner, ok := resource.Spec["owner"].(string); ok && rawOwner != "" {
 		owner = rawOwner
 	}
+
+	current, err := os.ReadFile(path)
+	if err == nil && string(current) == string(srcContent) {
+		// Content matches — check metadata drift only.
+		info, statErr := os.Stat(path)
+		if statErr != nil {
+			return nil, statErr
+		}
+		return metadataOps(path, info, mode, owner), nil
+	}
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+
+	var ops []string
+	if err != nil {
+		ops = append(ops, "# new file")
+	} else {
+		ops = append(ops, "# content changed")
+	}
 	content := string(srcContent)
 	delim := uniqueHeredocDelimiter(content)
-	return []string{
-		fmt.Sprintf("stdlib_file_write %s %s %s <<'%s'\n%s\n%s", shellQuote(path), shellQuote(mode), shellQuote(owner), delim, content, delim),
-	}, nil
+	ops = append(ops, fmt.Sprintf("stdlib_file_write %s %s %s <<'%s'\n%s\n%s", shellQuote(path), shellQuote(mode), shellQuote(owner), delim, content, delim))
+	return ops, nil
 }
 
 // fileCopyProvider copies a file from source to destination using stdlib_file_copy.
@@ -383,14 +419,6 @@ func (fileCopyProvider) Plan(resource manifest.ResolvedResource) ([]string, erro
 		return nil, fmt.Errorf("file_copy: reading source %s: %w", source, err)
 	}
 
-	current, err := os.ReadFile(path)
-	if err == nil && string(current) == string(srcContent) {
-		return nil, nil
-	}
-	if err != nil && !os.IsNotExist(err) {
-		return nil, err
-	}
-
 	mode := "0644"
 	if rawMode, ok := resource.Spec["mode"].(string); ok && rawMode != "" {
 		mode = rawMode
@@ -399,9 +427,28 @@ func (fileCopyProvider) Plan(resource manifest.ResolvedResource) ([]string, erro
 	if rawOwner, ok := resource.Spec["owner"].(string); ok && rawOwner != "" {
 		owner = rawOwner
 	}
-	return []string{
-		fmt.Sprintf("stdlib_file_copy %s %s %s %s", shellQuote(source), shellQuote(path), shellQuote(mode), shellQuote(owner)),
-	}, nil
+
+	current, err := os.ReadFile(path)
+	if err == nil && string(current) == string(srcContent) {
+		// Content matches — check metadata drift only.
+		info, statErr := os.Stat(path)
+		if statErr != nil {
+			return nil, statErr
+		}
+		return metadataOps(path, info, mode, owner), nil
+	}
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+
+	var ops []string
+	if err != nil {
+		ops = append(ops, "# new file")
+	} else {
+		ops = append(ops, "# content changed")
+	}
+	ops = append(ops, fmt.Sprintf("stdlib_file_copy %s %s %s %s", shellQuote(source), shellQuote(path), shellQuote(mode), shellQuote(owner)))
+	return ops, nil
 }
 
 // directoryProvider ensures a directory exists with the correct mode and owner.
@@ -431,22 +478,13 @@ func (directoryProvider) Plan(resource manifest.ResolvedResource) ([]string, err
 		if !info.IsDir() {
 			return nil, fmt.Errorf("directory: path %s exists but is not a directory", path)
 		}
-		// Directory exists — check if mode needs correction.
-		// Owner checking requires syscall and is handled by the stdlib at apply time,
-		// so we always emit chown if owner is specified to ensure convergence.
-		currentMode := fmt.Sprintf("0%o", info.Mode().Perm())
-		if currentMode == mode {
-			// Already converged (mode matches; owner enforced at apply time)
-			return nil, nil
-		}
-		// Mode drift — emit correction ops
-		var ops []string
-		ops = append(ops, fmt.Sprintf("chmod %s %s", shellQuote(mode), shellQuote(path)))
-		return ops, nil
+		// Directory exists — check metadata drift (mode and owner).
+		return metadataOps(path, info, mode, owner), nil
 	}
 
 	// Directory does not exist — create it
 	return []string{
+		"# new directory",
 		fmt.Sprintf("stdlib_dir_create %s %s %s", shellQuote(path), shellQuote(mode), shellQuote(owner)),
 	}, nil
 }
@@ -512,6 +550,47 @@ func (fileAbsentProvider) Plan(resource manifest.ResolvedResource) ([]string, er
 		ops = append(ops, fmt.Sprintf("stdlib_file_remove %s", shellQuote(p)))
 	}
 	return ops, nil
+}
+
+// metadataOps checks mode and owner of an existing file or directory and returns
+// correction operations with descriptive comments when they differ from desired.
+func metadataOps(path string, info os.FileInfo, desiredMode, desiredOwner string) []string {
+	var ops []string
+
+	currentMode := fmt.Sprintf("0%o", info.Mode().Perm())
+	if currentMode != desiredMode {
+		ops = append(ops, fmt.Sprintf("# mode: %s → %s", currentMode, desiredMode))
+		ops = append(ops, fmt.Sprintf("chmod %s %s", shellQuote(desiredMode), shellQuote(path)))
+	}
+
+	// Check ownership only when running as root (only root can reliably chown).
+	if os.Getuid() == 0 {
+		currentOwner := fileOwner(info)
+		if currentOwner != "" && currentOwner != desiredOwner {
+			ops = append(ops, fmt.Sprintf("# owner: %s → %s", currentOwner, desiredOwner))
+			ops = append(ops, fmt.Sprintf("chown %s %s", shellQuote(desiredOwner), shellQuote(path)))
+		}
+	}
+
+	return ops
+}
+
+// fileOwner returns the "user:group" string for a file's current owner.
+// Returns empty string if the owner cannot be determined.
+func fileOwner(info os.FileInfo) string {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	if !ok {
+		return ""
+	}
+	u, err := user.LookupId(fmt.Sprintf("%d", stat.Uid))
+	if err != nil {
+		return ""
+	}
+	g, err := user.LookupGroupId(fmt.Sprintf("%d", stat.Gid))
+	if err != nil {
+		return ""
+	}
+	return u.Username + ":" + g.Name
 }
 
 // shellQuote wraps a string in single quotes, escaping any embedded single quotes.
