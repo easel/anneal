@@ -128,4 +128,32 @@ stdlib_sudoers_write() {
   mv "$_tmp" "$_file"
   chmod 0440 "$_file"
 }
+
+stdlib_service_enable() {
+  systemctl enable "$1"
+}
+
+stdlib_service_disable() {
+  systemctl disable "$1"
+}
+
+stdlib_service_start() {
+  systemctl start "$1"
+}
+
+stdlib_service_stop() {
+  systemctl stop "$1"
+}
+
+stdlib_service_restart() {
+  systemctl restart "$1"
+}
+
+stdlib_service_mask() {
+  systemctl mask "$1"
+}
+
+stdlib_daemon_reload() {
+  systemctl daemon-reload
+}
 `

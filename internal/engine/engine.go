@@ -151,6 +151,8 @@ func NewPlanner() *Planner {
 			"user_in_group":    userInGroupProvider{},
 			"posix_acl":        posixACLProvider{},
 			"sudoers_entry":    sudoersEntryProvider{},
+			"systemd_service":  systemdServiceProvider{},
+			"systemd_unit":     systemdUnitProvider{},
 		},
 	}
 }
