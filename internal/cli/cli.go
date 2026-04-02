@@ -99,6 +99,7 @@ func newRootCmd(stdout, stderr io.Writer, version string) *cobra.Command {
 	root.AddCommand(newPlanCmd(&opts))
 	root.AddCommand(newApplyCmd(&opts))
 	root.AddCommand(newProvidersCmd())
+	root.AddCommand(newGenerateCmd())
 	root.AddCommand(newVersionCmd(version))
 
 	return root
