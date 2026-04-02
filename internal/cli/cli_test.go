@@ -58,23 +58,51 @@ resources:
 }
 
 func TestPlanSkeletonHasDeterministicExitCode(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "motd")
 	manifestPath := writeManifest(t, `
 resources:
   - kind: file
     name: motd
     spec:
-      path: /etc/motd
+      path: `+target+`
+      content: hello
 `)
 
 	stdout, stderr, code := runCLI(t, "dev", "plan", "-f", manifestPath)
-	if code != ExitCodeUnimplemented {
-		t.Fatalf("plan exit code = %d, want %d", code, ExitCodeUnimplemented)
+	if code != ExitCodeSuccess {
+		t.Fatalf("plan exit code = %d, want %d", code, ExitCodeSuccess)
 	}
-	if !strings.Contains(stdout, "not implemented yet") {
-		t.Fatalf("plan stdout = %q, want placeholder", stdout)
+	if !strings.Contains(stdout, "stdlib_file_write") {
+		t.Fatalf("plan stdout = %q, want stdlib file write", stdout)
 	}
-	if !strings.Contains(stderr, "plan pipeline not implemented") {
-		t.Fatalf("plan stderr = %q, want unimplemented error", stderr)
+	if stderr != "" {
+		t.Fatalf("plan stderr = %q, want empty", stderr)
+	}
+}
+
+func TestValidateRejectsDependencyCycles(t *testing.T) {
+	manifestPath := writeManifest(t, `
+resources:
+  - kind: file
+    name: a
+    depends_on: [b]
+    spec:
+      path: /tmp/a
+      content: a
+  - kind: file
+    name: b
+    depends_on: [a]
+    spec:
+      path: /tmp/b
+      content: b
+`)
+
+	_, stderr, code := runCLI(t, "dev", "validate", "--manifest", manifestPath)
+	if code != ExitCodeRuntimeError {
+		t.Fatalf("validate exit code = %d, want %d", code, ExitCodeRuntimeError)
+	}
+	if !strings.Contains(stderr, "dependency cycle detected") {
+		t.Fatalf("validate stderr = %q, want cycle detection error", stderr)
 	}
 }
 

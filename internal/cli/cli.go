@@ -4,7 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"strings"
 
+	"github.com/erik/anneal/internal/engine"
 	"github.com/erik/anneal/internal/manifest"
 	"github.com/spf13/cobra"
 )
@@ -94,7 +97,14 @@ func newValidateCmd(opts *options) *cobra.Command {
 		Use:   "validate",
 		Short: "Validate the manifest without touching system state",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if _, err := manifest.Load(opts.manifestPath); err != nil {
+			resolved, err := manifest.LoadResolved(opts.manifestPath, manifest.ResolveOptions{
+				Env:      currentEnv(),
+				Builtins: manifest.CurrentBuiltins(),
+			})
+			if err != nil {
+				return err
+			}
+			if err := engine.NewPlanner().Validate(resolved.Resources); err != nil {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "manifest %s is valid\n", opts.manifestPath)
@@ -108,14 +118,23 @@ func newPlanCmd(opts *options) *cobra.Command {
 		Use:   "plan",
 		Short: "Build an execution plan from the manifest",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if _, err := manifest.Load(opts.manifestPath); err != nil {
+			resolved, err := manifest.LoadResolved(opts.manifestPath, manifest.ResolveOptions{
+				Env:      currentEnv(),
+				Builtins: manifest.CurrentBuiltins(),
+			})
+			if err != nil {
 				return err
 			}
-			fmt.Fprintln(cmd.OutOrStdout(), "plan command is not implemented yet")
-			return &exitError{
-				code: ExitCodeUnimplemented,
-				err:  errors.New("plan pipeline not implemented"),
+			plan, err := engine.NewPlanner().Build(resolved.Resources)
+			if err != nil {
+				return err
 			}
+			if plan == "" {
+				fmt.Fprintln(cmd.OutOrStdout(), "# plan is empty")
+				return nil
+			}
+			fmt.Fprint(cmd.OutOrStdout(), plan)
+			return nil
 		},
 	}
 }
@@ -145,4 +164,16 @@ func newVersionCmd(version string) *cobra.Command {
 			fmt.Fprintln(cmd.OutOrStdout(), version)
 		},
 	}
+}
+
+func currentEnv() map[string]string {
+	env := make(map[string]string, len(os.Environ()))
+	for _, entry := range os.Environ() {
+		key, value, found := strings.Cut(entry, "=")
+		if !found {
+			continue
+		}
+		env[key] = value
+	}
+	return env
 }
