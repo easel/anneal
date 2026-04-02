@@ -184,8 +184,10 @@ func (b Builtins) withDefaults() Builtins {
 		b.Hostname = current.Hostname
 	}
 	if b.FQDN == "" {
-		b.FQDN = b.Hostname
-		if current.FQDN != "" {
+		if b.Hostname != current.Hostname {
+			// Caller provided a custom hostname; fall back to it for FQDN.
+			b.FQDN = b.Hostname
+		} else {
 			b.FQDN = current.FQDN
 		}
 	}

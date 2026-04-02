@@ -134,6 +134,14 @@ resources:
 	}
 }
 
+func TestBuiltinsWithDefaultsFQDNUsesCallerHostname(t *testing.T) {
+	b := Builtins{Hostname: "custom-host"}
+	got := b.withDefaults()
+	if got.FQDN != "custom-host" {
+		t.Fatalf("FQDN = %q, want %q (caller-supplied Hostname)", got.FQDN, "custom-host")
+	}
+}
+
 func writeManifest(t *testing.T, contents string) string {
 	t.Helper()
 	dir := t.TempDir()
