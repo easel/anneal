@@ -146,6 +146,11 @@ func NewPlanner() *Planner {
 			"brew_tap":         brewTapProvider{},
 			"dnf_packages":     dnfPackagesProvider{},
 			"pacman_packages":  pacmanPackagesProvider{},
+			"user":             userProvider{},
+			"group":            groupProvider{},
+			"user_in_group":    userInGroupProvider{},
+			"posix_acl":        posixACLProvider{},
+			"sudoers_entry":    sudoersEntryProvider{},
 		},
 	}
 }

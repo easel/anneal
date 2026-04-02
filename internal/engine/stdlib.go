@@ -94,4 +94,38 @@ stdlib_aur_install() {
   _user="$1"; _helper="$2"; shift 2
   sudo -u "$_user" "$_helper" -S --noconfirm --needed "$@"
 }
+
+stdlib_user_create() {
+  _name="$1"; shift
+  useradd "$@" "$_name"
+}
+
+stdlib_user_modify() {
+  _name="$1"; shift
+  usermod "$@" "$_name"
+}
+
+stdlib_group_create() {
+  _name="$1"; shift
+  groupadd "$@" "$_name"
+}
+
+stdlib_user_add_group() {
+  _user="$1"; _group="$2"
+  usermod -aG "$_group" "$_user"
+}
+
+stdlib_setfacl() {
+  setfacl "$@"
+}
+
+stdlib_sudoers_write() {
+  _file="$1"
+  _content="$(cat)"
+  _tmp="$(mktemp)"
+  printf '%s\n' "$_content" > "$_tmp"
+  visudo -cf "$_tmp" || { rm -f "$_tmp"; echo "sudoers syntax error" >&2; return 1; }
+  mv "$_tmp" "$_file"
+  chmod 0440 "$_file"
+}
 `
