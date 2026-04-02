@@ -210,12 +210,14 @@ func lookupEnvOverride(env map[string]string, key string) (string, bool) {
 	if env == nil {
 		return "", false
 	}
-	candidates := []string{
-		key,
-		strings.ToUpper(key),
-		nonEnvCharPattern.ReplaceAllString(strings.ToUpper(key), "_"),
+	normalized := nonEnvCharPattern.ReplaceAllString(strings.ToUpper(key), "_")
+	// Prefer ANNEAL_-prefixed forms to avoid collisions with system env vars.
+	prefixed := []string{
+		"ANNEAL_" + normalized,
+		"ANNEAL_" + strings.ToUpper(key),
+		"ANNEAL_" + key,
 	}
-	for _, candidate := range slices.Compact(candidates) {
+	for _, candidate := range slices.Compact(prefixed) {
 		if value, ok := env[candidate]; ok {
 			return value, true
 		}

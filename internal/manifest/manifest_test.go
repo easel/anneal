@@ -84,8 +84,8 @@ resources:
 
 	resolved, err := LoadResolved(path, ResolveOptions{
 		Env: map[string]string{
-			"ENV_NAME": "staging",
-			"GREETING": "bonjour",
+			"ANNEAL_ENV_NAME": "staging",
+			"ANNEAL_GREETING": "bonjour",
 		},
 		Builtins: Builtins{
 			Hostname:   "timbuktu",
@@ -131,6 +131,46 @@ resources:
 	}
 	if !strings.Contains(err.Error(), "missing") {
 		t.Fatalf("LoadResolved() error = %q, want missing variable message", err)
+	}
+}
+
+func TestEnvOverrideRequiresAnnealPrefix(t *testing.T) {
+	path := writeManifest(t, `
+vars:
+  path: /app/data
+resources:
+  - kind: file
+    name: cfg
+    spec:
+      path: /tmp/cfg
+      content: "{{ .path }}"
+`)
+
+	// Bare PATH in env must NOT override manifest var "path"
+	resolved, err := LoadResolved(path, ResolveOptions{
+		Env: map[string]string{
+			"PATH": "/usr/bin:/bin",
+		},
+	})
+	if err != nil {
+		t.Fatalf("LoadResolved() error = %v", err)
+	}
+	if got := resolved.Vars["path"]; got != "/app/data" {
+		t.Fatalf("vars[path] = %v, want /app/data (bare PATH should not collide)", got)
+	}
+
+	// ANNEAL_PATH should override
+	resolved2, err := LoadResolved(path, ResolveOptions{
+		Env: map[string]string{
+			"PATH":        "/usr/bin:/bin",
+			"ANNEAL_PATH": "/overridden",
+		},
+	})
+	if err != nil {
+		t.Fatalf("LoadResolved() error = %v", err)
+	}
+	if got := resolved2.Vars["path"]; got != "/overridden" {
+		t.Fatalf("vars[path] = %v, want /overridden", got)
 	}
 }
 
