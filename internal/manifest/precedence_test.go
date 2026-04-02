@@ -189,6 +189,178 @@ resources:
 	}
 }
 
+func TestFullPrecedenceChain(t *testing.T) {
+	dir := t.TempDir()
+
+	// Module with defaults
+	writeFileForTest(t, filepath.Join(dir, "module.yaml"), `
+vars:
+  a: module-default-a
+  b: module-default-b
+  c: module-default-c
+  d: module-default-d
+resources:
+  - kind: file
+    name: m
+    spec:
+      path: /tmp/m
+      content: ok
+`)
+
+	// Host vars file
+	writeFileForTest(t, filepath.Join(dir, "host.yaml"), `
+c: host-override-c
+d: host-override-d
+`)
+
+	// Root manifest overrides b
+	writeFileForTest(t, filepath.Join(dir, "root.yaml"), `
+vars:
+  b: root-override-b
+  c: root-override-c
+  d: root-override-d
+includes:
+  - path: module.yaml
+resources:
+  - kind: file
+    name: r
+    spec:
+      path: /tmp/r
+      content: ok
+`)
+
+	resolved, err := LoadResolved(filepath.Join(dir, "root.yaml"), ResolveOptions{
+		Env: map[string]string{
+			"ANNEAL_D": "env-override-d",
+		},
+		HostVarsFile: filepath.Join(dir, "host.yaml"),
+	})
+	if err != nil {
+		t.Fatalf("LoadResolved() error = %v", err)
+	}
+
+	// a: only module default (nothing overrides it)
+	if got := resolved.Vars["a"]; got != "module-default-a" {
+		t.Errorf("vars[a] = %v, want module-default-a", got)
+	}
+	// b: root overrides module default
+	if got := resolved.Vars["b"]; got != "root-override-b" {
+		t.Errorf("vars[b] = %v, want root-override-b", got)
+	}
+	// c: host file overrides root
+	if got := resolved.Vars["c"]; got != "host-override-c" {
+		t.Errorf("vars[c] = %v, want host-override-c", got)
+	}
+	// d: env overrides host file (and everything else)
+	if got := resolved.Vars["d"]; got != "env-override-d" {
+		t.Errorf("vars[d] = %v, want env-override-d", got)
+	}
+}
+
+func TestHostVarsFileNotFound(t *testing.T) {
+	path := writeTempManifest(t, `
+vars:
+  x: val
+resources:
+  - kind: file
+    name: cfg
+    spec:
+      path: /tmp/cfg
+      content: ok`)
+
+	_, err := LoadResolved(path, ResolveOptions{
+		HostVarsFile: "/nonexistent/host.yaml",
+	})
+	if err == nil {
+		t.Fatal("expected error for missing host vars file")
+	}
+	if !strings.Contains(err.Error(), "host vars") {
+		t.Fatalf("error = %q, want containing 'host vars'", err)
+	}
+}
+
+func TestHostVarsCanIntroduceNewVars(t *testing.T) {
+	dir := t.TempDir()
+
+	writeFileForTest(t, filepath.Join(dir, "host.yaml"), `
+host_specific: from-host
+`)
+
+	path := writeFileForTest(t, filepath.Join(dir, "root.yaml"), `
+vars:
+  base: val
+resources:
+  - kind: file
+    name: cfg
+    spec:
+      path: /tmp/cfg
+      content: "{{ .base }} {{ .host_specific }}"
+`)
+
+	resolved, err := LoadResolved(path, ResolveOptions{
+		HostVarsFile: filepath.Join(dir, "host.yaml"),
+	})
+	if err != nil {
+		t.Fatalf("LoadResolved() error = %v", err)
+	}
+	if got := resolved.Vars["host_specific"]; got != "from-host" {
+		t.Errorf("vars[host_specific] = %v, want from-host", got)
+	}
+	// Verify template rendering works with host var
+	if got := resolved.Resources[0].Spec["content"]; got != "val from-host" {
+		t.Errorf("content = %v, want 'val from-host'", got)
+	}
+}
+
+func TestIncludeVarsInTemplates(t *testing.T) {
+	dir := t.TempDir()
+
+	writeFileForTest(t, filepath.Join(dir, "module.yaml"), `
+vars:
+  greeting: default
+resources:
+  - kind: file
+    name: m
+    spec:
+      path: /tmp/m
+      content: "{{ .greeting }}"
+`)
+
+	path := writeFileForTest(t, filepath.Join(dir, "root.yaml"), `
+includes:
+  - path: module.yaml
+    vars:
+      greeting: overridden
+resources:
+  - kind: file
+    name: r
+    spec:
+      path: /tmp/r
+      content: ok
+`)
+
+	resolved, err := LoadResolved(path, ResolveOptions{})
+	if err != nil {
+		t.Fatalf("LoadResolved() error = %v", err)
+	}
+
+	// Module resource should render with overridden var
+	if got := resolved.Resources[0].Spec["content"]; got != "overridden" {
+		t.Fatalf("module content = %v, want 'overridden'", got)
+	}
+}
+
+func writeFileForTest(t *testing.T, path, contents string) string {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(strings.TrimSpace(contents)+"\n"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	return path
+}
+
 func writeTempManifest(t *testing.T, contents string) string {
 	t.Helper()
 	dir := t.TempDir()

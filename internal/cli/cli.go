@@ -60,6 +60,7 @@ func (flagParseError) Error() string { return "usage error" }
 
 type options struct {
 	manifestPath string
+	hostVarsFile string
 }
 
 func newRootCmd(stdout, stderr io.Writer, version string) *cobra.Command {
@@ -83,6 +84,12 @@ func newRootCmd(stdout, stderr io.Writer, version string) *cobra.Command {
 		"anneal.yaml",
 		"Path to the manifest file",
 	)
+	root.PersistentFlags().StringVar(
+		&opts.hostVarsFile,
+		"host-vars",
+		"",
+		"Path to host-specific variable overrides file",
+	)
 
 	root.AddCommand(newValidateCmd(&opts))
 	root.AddCommand(newPlanCmd(&opts))
@@ -98,8 +105,9 @@ func newValidateCmd(opts *options) *cobra.Command {
 		Short: "Validate the manifest without touching system state",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			resolved, err := manifest.LoadResolved(opts.manifestPath, manifest.ResolveOptions{
-				Env:      currentEnv(),
-				Builtins: manifest.CurrentBuiltins(),
+				Env:          currentEnv(),
+				Builtins:     manifest.CurrentBuiltins(),
+				HostVarsFile: opts.hostVarsFile,
 			})
 			if err != nil {
 				return err
@@ -119,8 +127,9 @@ func newPlanCmd(opts *options) *cobra.Command {
 		Short: "Build an execution plan from the manifest",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			resolved, err := manifest.LoadResolved(opts.manifestPath, manifest.ResolveOptions{
-				Env:      currentEnv(),
-				Builtins: manifest.CurrentBuiltins(),
+				Env:          currentEnv(),
+				Builtins:     manifest.CurrentBuiltins(),
+				HostVarsFile: opts.hostVarsFile,
 			})
 			if err != nil {
 				return err
@@ -146,8 +155,9 @@ func newApplyCmd(opts *options) *cobra.Command {
 		Short: "Apply the manifest, converging the system to desired state",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			resolved, err := manifest.LoadResolved(opts.manifestPath, manifest.ResolveOptions{
-				Env:      currentEnv(),
-				Builtins: manifest.CurrentBuiltins(),
+				Env:          currentEnv(),
+				Builtins:     manifest.CurrentBuiltins(),
+				HostVarsFile: opts.hostVarsFile,
 			})
 			if err != nil {
 				return err

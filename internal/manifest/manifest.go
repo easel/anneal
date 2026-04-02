@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"slices"
@@ -15,8 +16,15 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Include declares an included manifest with optional variable overrides.
+type Include struct {
+	Path string         `yaml:"path"`
+	Vars map[string]any `yaml:"vars"`
+}
+
 type Manifest struct {
 	Vars      map[string]any `yaml:"vars"`
+	Includes  []Include      `yaml:"includes"`
 	Resources []Resource     `yaml:"resources"`
 }
 
@@ -42,8 +50,9 @@ type ResolvedResource struct {
 }
 
 type ResolveOptions struct {
-	Env      map[string]string
-	Builtins Builtins
+	Env          map[string]string
+	Builtins     Builtins
+	HostVarsFile string // Optional path to host-specific variable overrides
 }
 
 type Builtins struct {
@@ -57,7 +66,13 @@ type Builtins struct {
 
 var nonEnvCharPattern = regexp.MustCompile(`[^A-Za-z0-9]+`)
 
+// Load loads a manifest and recursively resolves includes with cycle detection.
 func Load(path string) (*Manifest, error) {
+	return loadWithIncludes(path, nil)
+}
+
+// loadSingle loads and validates a single manifest file without processing includes.
+func loadSingle(path string) (*Manifest, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("load manifest %s: %w", path, err)
@@ -77,6 +92,79 @@ func Load(path string) (*Manifest, error) {
 	}
 
 	return &manifest, nil
+}
+
+// loadWithIncludes recursively loads a manifest and its includes, detecting cycles.
+func loadWithIncludes(path string, visited []string) (*Manifest, error) {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("resolve path %s: %w", path, err)
+	}
+
+	// Cycle detection
+	for _, v := range visited {
+		if v == absPath {
+			chain := append(append([]string{}, visited...), absPath)
+			return nil, fmt.Errorf("circular include detected: %s", strings.Join(chain, " → "))
+		}
+	}
+
+	raw, err := loadSingle(path)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(raw.Includes) == 0 {
+		return raw, nil
+	}
+
+	dir := filepath.Dir(absPath)
+	newVisited := append(append([]string{}, visited...), absPath)
+
+	mergedVars := map[string]any{}
+	var mergedResources []Resource
+
+	for _, inc := range raw.Includes {
+		if inc.Path == "" {
+			return nil, fmt.Errorf("load manifest %s: include path is required", path)
+		}
+		incPath := inc.Path
+		if !filepath.IsAbs(incPath) {
+			incPath = filepath.Join(dir, incPath)
+		}
+
+		child, err := loadWithIncludes(incPath, newVisited)
+		if err != nil {
+			return nil, fmt.Errorf("include %s: %w", inc.Path, err)
+		}
+
+		// Module defaults: add child vars without overriding existing
+		for k, v := range child.Vars {
+			if _, exists := mergedVars[k]; !exists {
+				mergedVars[k] = v
+			}
+		}
+
+		// Include-level var overrides from the parent
+		for k, v := range inc.Vars {
+			mergedVars[k] = v
+		}
+
+		mergedResources = append(mergedResources, child.Resources...)
+	}
+
+	// Root vars override everything from modules
+	for k, v := range raw.Vars {
+		mergedVars[k] = v
+	}
+
+	// Include resources before root resources
+	mergedResources = append(mergedResources, raw.Resources...)
+
+	return &Manifest{
+		Vars:      mergedVars,
+		Resources: mergedResources,
+	}, nil
 }
 
 func LoadResolved(path string, opts ResolveOptions) (*ResolvedManifest, error) {
@@ -120,10 +208,27 @@ func (m *Manifest) Validate() error {
 
 func (m *Manifest) Resolve(opts ResolveOptions) (*ResolvedManifest, error) {
 	builtins := opts.Builtins.withDefaults()
+
+	// Variable precedence: module defaults → root vars → host file → env vars.
+	// By this point m.Vars already has module defaults merged under root vars
+	// (handled by loadWithIncludes), so we start with those.
 	resolvedVars := map[string]any{}
 	for key, value := range m.Vars {
 		resolvedVars[key] = value
 	}
+
+	// Host file overrides (between manifest vars and env vars)
+	if opts.HostVarsFile != "" {
+		hostVars, err := loadHostVars(opts.HostVarsFile)
+		if err != nil {
+			return nil, fmt.Errorf("host vars: %w", err)
+		}
+		for k, v := range hostVars {
+			resolvedVars[k] = v
+		}
+	}
+
+	// Environment overrides (highest precedence for variables)
 	for key := range resolvedVars {
 		if value, ok := lookupEnvOverride(opts.Env, key); ok {
 			resolvedVars[key] = value
@@ -285,6 +390,19 @@ func RenderString(value string, ctx map[string]any) (string, error) {
 		return "", err
 	}
 	return buf.String(), nil
+}
+
+// loadHostVars loads a YAML file containing host-specific variable overrides.
+func loadHostVars(path string) (map[string]any, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("load host vars %s: %w", path, err)
+	}
+	var vars map[string]any
+	if err := yaml.Unmarshal(data, &vars); err != nil {
+		return nil, fmt.Errorf("load host vars %s: %w", path, err)
+	}
+	return vars, nil
 }
 
 func readOSVersion() string {
