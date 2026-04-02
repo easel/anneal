@@ -445,6 +445,294 @@ resources:
 	}
 }
 
+func TestEachExpandsToMultipleResources(t *testing.T) {
+	path := writeManifest(t, `
+resources:
+  - kind: file
+    name: "config-{{ .Item }}"
+    each:
+      - alpha
+      - beta
+      - gamma
+    spec:
+      path: "/etc/{{ .Item }}.conf"
+      content: "data for {{ .Item }}"
+`)
+
+	resolved, err := LoadResolved(path, ResolveOptions{})
+	if err != nil {
+		t.Fatalf("LoadResolved() error = %v", err)
+	}
+
+	if len(resolved.Resources) != 3 {
+		t.Fatalf("len(Resources) = %d, want 3", len(resolved.Resources))
+	}
+
+	wantNames := []string{"config-alpha", "config-beta", "config-gamma"}
+	for i, want := range wantNames {
+		if resolved.Resources[i].Name != want {
+			t.Errorf("resource[%d].Name = %q, want %q", i, resolved.Resources[i].Name, want)
+		}
+	}
+	// Check spec rendering with .Item
+	if got := resolved.Resources[0].Spec["path"]; got != "/etc/alpha.conf" {
+		t.Errorf("resource[0].spec.path = %v, want /etc/alpha.conf", got)
+	}
+	if got := resolved.Resources[1].Spec["content"]; got != "data for beta" {
+		t.Errorf("resource[1].spec.content = %v, want 'data for beta'", got)
+	}
+}
+
+func TestEachWithIndex(t *testing.T) {
+	path := writeManifest(t, `
+resources:
+  - kind: file
+    name: "item-{{ .Index }}"
+    each:
+      - first
+      - second
+    spec:
+      path: "/tmp/{{ .Index }}"
+      content: "{{ .Item }} at {{ .Index }}"
+`)
+
+	resolved, err := LoadResolved(path, ResolveOptions{})
+	if err != nil {
+		t.Fatalf("LoadResolved() error = %v", err)
+	}
+
+	if len(resolved.Resources) != 2 {
+		t.Fatalf("len(Resources) = %d, want 2", len(resolved.Resources))
+	}
+	if resolved.Resources[0].Name != "item-0" {
+		t.Errorf("resource[0].Name = %q, want item-0", resolved.Resources[0].Name)
+	}
+	if resolved.Resources[1].Name != "item-1" {
+		t.Errorf("resource[1].Name = %q, want item-1", resolved.Resources[1].Name)
+	}
+	if got := resolved.Resources[0].Spec["content"]; got != "first at 0" {
+		t.Errorf("content = %v, want 'first at 0'", got)
+	}
+}
+
+func TestEachEmptyListProducesZeroResources(t *testing.T) {
+	path := writeManifest(t, `
+resources:
+  - kind: file
+    name: "will-not-exist"
+    each: []
+    spec:
+      path: /tmp/x
+      content: x
+`)
+
+	resolved, err := LoadResolved(path, ResolveOptions{})
+	if err != nil {
+		t.Fatalf("LoadResolved() error = %v", err)
+	}
+
+	if len(resolved.Resources) != 0 {
+		t.Fatalf("len(Resources) = %d, want 0 (empty each)", len(resolved.Resources))
+	}
+}
+
+func TestEachWithComplexItems(t *testing.T) {
+	path := writeManifest(t, `
+resources:
+  - kind: file
+    name: "svc-{{ .Item.name }}"
+    each:
+      - name: web
+        port: "8080"
+      - name: api
+        port: "9090"
+    spec:
+      path: "/etc/{{ .Item.name }}.conf"
+      content: "port={{ .Item.port }}"
+`)
+
+	resolved, err := LoadResolved(path, ResolveOptions{})
+	if err != nil {
+		t.Fatalf("LoadResolved() error = %v", err)
+	}
+
+	if len(resolved.Resources) != 2 {
+		t.Fatalf("len(Resources) = %d, want 2", len(resolved.Resources))
+	}
+	if resolved.Resources[0].Name != "svc-web" {
+		t.Errorf("resource[0].Name = %q, want svc-web", resolved.Resources[0].Name)
+	}
+	if got := resolved.Resources[1].Spec["content"]; got != "port=9090" {
+		t.Errorf("resource[1].spec.content = %v, want 'port=9090'", got)
+	}
+}
+
+func TestEachMixedWithNonIteratorResources(t *testing.T) {
+	path := writeManifest(t, `
+resources:
+  - kind: file
+    name: static-resource
+    spec:
+      path: /tmp/static
+      content: static
+  - kind: file
+    name: "iter-{{ .Item }}"
+    each:
+      - a
+      - b
+    spec:
+      path: "/tmp/{{ .Item }}"
+      content: iter
+  - kind: file
+    name: another-static
+    spec:
+      path: /tmp/another
+      content: static
+`)
+
+	resolved, err := LoadResolved(path, ResolveOptions{})
+	if err != nil {
+		t.Fatalf("LoadResolved() error = %v", err)
+	}
+
+	if len(resolved.Resources) != 4 {
+		t.Fatalf("len(Resources) = %d, want 4", len(resolved.Resources))
+	}
+	wantNames := []string{"static-resource", "iter-a", "iter-b", "another-static"}
+	for i, want := range wantNames {
+		if resolved.Resources[i].Name != want {
+			t.Errorf("resource[%d].Name = %q, want %q", i, resolved.Resources[i].Name, want)
+		}
+	}
+}
+
+func TestEachWithTemplateExpressionsInItems(t *testing.T) {
+	path := writeManifest(t, `
+vars:
+  prefix: srv
+resources:
+  - kind: file
+    name: "config-{{ .Item }}"
+    each:
+      - "{{ .prefix }}-web"
+      - "{{ .prefix }}-db"
+    spec:
+      path: "/etc/{{ .Item }}.conf"
+      content: ok
+`)
+
+	resolved, err := LoadResolved(path, ResolveOptions{})
+	if err != nil {
+		t.Fatalf("LoadResolved() error = %v", err)
+	}
+
+	if len(resolved.Resources) != 2 {
+		t.Fatalf("len(Resources) = %d, want 2", len(resolved.Resources))
+	}
+	// Pass 1 renders each items, pass 2 renders name/spec
+	if resolved.Resources[0].Name != "config-srv-web" {
+		t.Errorf("resource[0].Name = %q, want config-srv-web", resolved.Resources[0].Name)
+	}
+	if resolved.Resources[1].Name != "config-srv-db" {
+		t.Errorf("resource[1].Name = %q, want config-srv-db", resolved.Resources[1].Name)
+	}
+}
+
+func TestEachWithBuiltinsInItems(t *testing.T) {
+	path := writeManifest(t, `
+resources:
+  - kind: file
+    name: "host-{{ .Item }}"
+    each:
+      - "{{ .Hostname }}-app"
+    spec:
+      path: "/tmp/{{ .Item }}"
+      content: ok
+`)
+
+	resolved, err := LoadResolved(path, ResolveOptions{
+		Builtins: Builtins{Hostname: "myhost"},
+	})
+	if err != nil {
+		t.Fatalf("LoadResolved() error = %v", err)
+	}
+
+	if len(resolved.Resources) != 1 {
+		t.Fatalf("len(Resources) = %d, want 1", len(resolved.Resources))
+	}
+	if resolved.Resources[0].Name != "host-myhost-app" {
+		t.Errorf("resource[0].Name = %q, want host-myhost-app", resolved.Resources[0].Name)
+	}
+}
+
+func TestEachDependsOnWithItem(t *testing.T) {
+	path := writeManifest(t, `
+resources:
+  - kind: file
+    name: "dep-{{ .Item }}"
+    each:
+      - alpha
+      - beta
+    depends_on:
+      - "base-{{ .Item }}"
+    spec:
+      path: /tmp/x
+      content: ok
+`)
+
+	resolved, err := LoadResolved(path, ResolveOptions{})
+	if err != nil {
+		t.Fatalf("LoadResolved() error = %v", err)
+	}
+
+	if len(resolved.Resources) != 2 {
+		t.Fatalf("len(Resources) = %d, want 2", len(resolved.Resources))
+	}
+	if !reflect.DeepEqual(resolved.Resources[0].DependsOn, []string{"base-alpha"}) {
+		t.Errorf("resource[0].DependsOn = %v, want [base-alpha]", resolved.Resources[0].DependsOn)
+	}
+	if !reflect.DeepEqual(resolved.Resources[1].DependsOn, []string{"base-beta"}) {
+		t.Errorf("resource[1].DependsOn = %v, want [base-beta]", resolved.Resources[1].DependsOn)
+	}
+}
+
+func TestEachDeclarationOrder(t *testing.T) {
+	path := writeManifest(t, `
+resources:
+  - kind: file
+    name: first
+    spec:
+      path: /tmp/first
+      content: ok
+  - kind: file
+    name: "iter-{{ .Item }}"
+    each:
+      - a
+      - b
+      - c
+    spec:
+      path: /tmp/x
+      content: ok
+  - kind: file
+    name: last
+    spec:
+      path: /tmp/last
+      content: ok
+`)
+
+	resolved, err := LoadResolved(path, ResolveOptions{})
+	if err != nil {
+		t.Fatalf("LoadResolved() error = %v", err)
+	}
+
+	// DeclarationOrder should be sequential across expanded resources
+	for i, r := range resolved.Resources {
+		if r.DeclarationOrder != i {
+			t.Errorf("resource[%d] (%s) DeclarationOrder = %d, want %d", i, r.Name, r.DeclarationOrder, i)
+		}
+	}
+}
+
 func TestBuiltinsWithDefaultsFQDNUsesCallerHostname(t *testing.T) {
 	b := Builtins{Hostname: "custom-host"}
 	got := b.withDefaults()

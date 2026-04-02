@@ -32,6 +32,7 @@ type Resource struct {
 	Kind      string         `yaml:"kind"`
 	Name      string         `yaml:"name"`
 	DependsOn []string       `yaml:"depends_on"`
+	Each      []any          `yaml:"each"`
 	Spec      map[string]any `yaml:"spec"`
 }
 
@@ -236,24 +237,66 @@ func (m *Manifest) Resolve(opts ResolveOptions) (*ResolvedManifest, error) {
 	}
 
 	ctx := makeTemplateContext(resolvedVars, builtins)
+
+	// Pass 1: Expand iterators.
+	// Resources with `each` are expanded into N concrete resources, one per item.
+	// Each item value is rendered through the base context so template expressions
+	// in the each list resolve before pass 2.
+	type expandedRes struct {
+		resource Resource
+		iterVars map[string]any // Item and Index for this expansion (nil if not from each)
+	}
+	var expanded []expandedRes
+	for _, resource := range m.Resources {
+		if resource.Each == nil {
+			// No each field — pass through unchanged
+			expanded = append(expanded, expandedRes{resource: resource})
+			continue
+		}
+		// Expand: each item becomes a separate resource
+		for idx, rawItem := range resource.Each {
+			item, err := resolveValue(rawItem, ctx)
+			if err != nil {
+				return nil, fmt.Errorf("resource %s each[%d]: %w", resource.Name, idx, err)
+			}
+			expanded = append(expanded, expandedRes{
+				resource: resource,
+				iterVars: map[string]any{
+					"Item":  item,
+					"Index": idx,
+				},
+			})
+		}
+		// Empty each list: zero resources produced (no error)
+	}
+
+	// Pass 2: Render all template expressions with full context.
 	resolved := &ResolvedManifest{
 		Vars:      mapsClone(resolvedVars),
-		Resources: make([]ResolvedResource, 0, len(m.Resources)),
+		Resources: make([]ResolvedResource, 0, len(expanded)),
 	}
-	for idx, resource := range m.Resources {
-		name, err := RenderString(resource.Name, ctx)
+	for idx, er := range expanded {
+		resourceCtx := ctx
+		if er.iterVars != nil {
+			resourceCtx = mapsClone(ctx)
+			for k, v := range er.iterVars {
+				resourceCtx[k] = v
+			}
+		}
+
+		name, err := RenderString(er.resource.Name, resourceCtx)
 		if err != nil {
 			return nil, fmt.Errorf("resource %d name: %w", idx, err)
 		}
-		dependsOn := make([]string, 0, len(resource.DependsOn))
-		for depIdx, dep := range resource.DependsOn {
-			rendered, err := RenderString(dep, ctx)
+		dependsOn := make([]string, 0, len(er.resource.DependsOn))
+		for depIdx, dep := range er.resource.DependsOn {
+			rendered, err := RenderString(dep, resourceCtx)
 			if err != nil {
 				return nil, fmt.Errorf("resource %d depends_on[%d]: %w", idx, depIdx, err)
 			}
 			dependsOn = append(dependsOn, rendered)
 		}
-		spec, err := resolveValue(resource.Spec, ctx)
+		spec, err := resolveValue(er.resource.Spec, resourceCtx)
 		if err != nil {
 			return nil, fmt.Errorf("resource %d (%s) spec: %w", idx, name, err)
 		}
@@ -262,11 +305,11 @@ func (m *Manifest) Resolve(opts ResolveOptions) (*ResolvedManifest, error) {
 			return nil, fmt.Errorf("resource %d (%s): spec must resolve to an object", idx, name)
 		}
 		resolved.Resources = append(resolved.Resources, ResolvedResource{
-			Kind:             resource.Kind,
+			Kind:             er.resource.Kind,
 			Name:             name,
 			DependsOn:        dependsOn,
 			Spec:             resolvedSpec,
-			Vars:             mapsClone(ctx),
+			Vars:             mapsClone(resourceCtx),
 			DeclarationOrder: idx,
 		})
 	}
