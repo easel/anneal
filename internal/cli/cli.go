@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -20,8 +21,9 @@ const (
 )
 
 type exitError struct {
-	code int
-	err  error
+	code   int
+	err    error
+	silent bool // When true, do not print error to stderr (used for JSON output)
 }
 
 func (e *exitError) Error() string {
@@ -41,7 +43,9 @@ func Execute(args []string, stdout, stderr io.Writer, version string) int {
 	if err := cmd.Execute(); err != nil {
 		var coded *exitError
 		if errors.As(err, &coded) {
-			fmt.Fprintln(stderr, coded.err)
+			if !coded.silent {
+				fmt.Fprintln(stderr, coded.err)
+			}
 			return coded.code
 		}
 		fmt.Fprintln(stderr, err)
@@ -100,7 +104,8 @@ func newRootCmd(stdout, stderr io.Writer, version string) *cobra.Command {
 }
 
 func newValidateCmd(opts *options) *cobra.Command {
-	return &cobra.Command{
+	var jsonOutput bool
+	cmd := &cobra.Command{
 		Use:   "validate",
 		Short: "Validate the manifest without touching system state",
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -110,19 +115,46 @@ func newValidateCmd(opts *options) *cobra.Command {
 				HostVarsFile: opts.hostVarsFile,
 			})
 			if err != nil {
+				if jsonOutput {
+					if wErr := writeJSON(cmd.OutOrStdout(), validateOutput{
+						Valid:  false,
+						Issues: []validateIssue{{Level: "error", Message: err.Error()}},
+					}); wErr != nil {
+						return wErr
+					}
+					return &exitError{code: ExitCodeRuntimeError, err: err, silent: true}
+				}
 				return err
 			}
 			if err := engine.NewPlanner().Validate(resolved.Resources); err != nil {
+				if jsonOutput {
+					if wErr := writeJSON(cmd.OutOrStdout(), validateOutput{
+						Valid:  false,
+						Issues: []validateIssue{{Level: "error", Message: err.Error()}},
+					}); wErr != nil {
+						return wErr
+					}
+					return &exitError{code: ExitCodeRuntimeError, err: err, silent: true}
+				}
 				return err
+			}
+			if jsonOutput {
+				return writeJSON(cmd.OutOrStdout(), validateOutput{
+					Valid:  true,
+					Issues: []validateIssue{},
+				})
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "manifest %s is valid\n", opts.manifestPath)
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output structured JSON")
+	return cmd
 }
 
 func newPlanCmd(opts *options) *cobra.Command {
-	return &cobra.Command{
+	var jsonOutput bool
+	cmd := &cobra.Command{
 		Use:   "plan",
 		Short: "Build an execution plan from the manifest",
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -133,6 +165,27 @@ func newPlanCmd(opts *options) *cobra.Command {
 			})
 			if err != nil {
 				return err
+			}
+			if jsonOutput {
+				plan, err := engine.NewPlanner().BuildPlan(resolved.Resources)
+				if err != nil {
+					return err
+				}
+				var resources []planResourceOutput
+				for _, rp := range plan.Resources {
+					status := "converged"
+					if rp.Script != "" {
+						status = "changed"
+					}
+					resources = append(resources, planResourceOutput{
+						Name:       rp.Name,
+						Kind:       rp.Kind,
+						Status:     status,
+						Operations: rp.Script,
+						Trigger:    rp.Trigger,
+					})
+				}
+				return writeJSON(cmd.OutOrStdout(), planOutput{Resources: resources})
 			}
 			plan, err := engine.NewPlanner().Build(resolved.Resources)
 			if err != nil {
@@ -146,10 +199,13 @@ func newPlanCmd(opts *options) *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output structured JSON")
+	return cmd
 }
 
 func newApplyCmd(opts *options) *cobra.Command {
 	var planFile string
+	var jsonOutput bool
 	cmd := &cobra.Command{
 		Use:   "apply",
 		Short: "Apply the manifest, converging the system to desired state",
@@ -177,6 +233,36 @@ func newApplyCmd(opts *options) *cobra.Command {
 				return err
 			}
 
+			if jsonOutput {
+				var resources []applyResourceOutput
+				for _, r := range result.Results {
+					entry := applyResourceOutput{
+						Name:   r.Name,
+						Kind:   r.Kind,
+						Status: r.Status.String(),
+					}
+					if r.Error != nil {
+						errMsg := r.Error.Error()
+						entry.Error = &errMsg
+					}
+					resources = append(resources, entry)
+				}
+				if writeErr := writeJSON(cmd.OutOrStdout(), applyOutput{
+					Success:   !result.Failed(),
+					Resources: resources,
+				}); writeErr != nil {
+					return writeErr
+				}
+				if result.Failed() {
+					return &exitError{
+						code:   ExitCodeRuntimeError,
+						err:    errors.New("apply failed"),
+						silent: true,
+					}
+				}
+				return nil
+			}
+
 			fmt.Fprint(cmd.OutOrStdout(), result.Summary())
 			if result.Failed() {
 				return &exitError{
@@ -188,6 +274,7 @@ func newApplyCmd(opts *options) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&planFile, "plan", "", "Path to a saved plan file for drift detection")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output structured JSON")
 	return cmd
 }
 
@@ -209,6 +296,48 @@ func newVersionCmd(version string) *cobra.Command {
 			fmt.Fprintln(cmd.OutOrStdout(), version)
 		},
 	}
+}
+
+// JSON output types for --json flag.
+
+type validateOutput struct {
+	Valid  bool            `json:"valid"`
+	Issues []validateIssue `json:"issues"`
+}
+
+type validateIssue struct {
+	Level   string `json:"level"`
+	Message string `json:"message"`
+}
+
+type planOutput struct {
+	Resources []planResourceOutput `json:"resources"`
+}
+
+type planResourceOutput struct {
+	Name       string `json:"name"`
+	Kind       string `json:"kind"`
+	Status     string `json:"status"` // "changed" or "converged"
+	Operations string `json:"operations,omitempty"`
+	Trigger    bool   `json:"trigger,omitempty"`
+}
+
+type applyOutput struct {
+	Success   bool                  `json:"success"`
+	Resources []applyResourceOutput `json:"resources"`
+}
+
+type applyResourceOutput struct {
+	Name   string  `json:"name"`
+	Kind   string  `json:"kind"`
+	Status string  `json:"status"` // "applied", "failed", "skipped", "converged"
+	Error  *string `json:"error,omitempty"`
+}
+
+func writeJSON(w io.Writer, v any) error {
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(v)
 }
 
 func currentEnv() map[string]string {

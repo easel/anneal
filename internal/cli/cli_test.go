@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -235,6 +236,233 @@ resources:
 	}
 	if string(data) != "different" {
 		t.Fatalf("file content = %q, want %q (drift should prevent execution)", string(data), "different")
+	}
+}
+
+// --- JSON output tests ---
+
+func TestValidateJSONValid(t *testing.T) {
+	manifestPath := writeManifest(t, `
+resources:
+  - kind: file
+    name: motd
+    spec:
+      path: /etc/motd
+      content: hello
+`)
+
+	stdout, stderr, code := runCLI(t, "dev", "validate", "--json", "--manifest", manifestPath)
+	if code != ExitCodeSuccess {
+		t.Fatalf("exit code = %d, want %d\nstderr: %s", code, ExitCodeSuccess, stderr)
+	}
+
+	var result validateOutput
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("JSON parse error: %v\noutput: %s", err, stdout)
+	}
+	if !result.Valid {
+		t.Fatalf("valid = false, want true")
+	}
+	if len(result.Issues) != 0 {
+		t.Fatalf("issues = %v, want empty", result.Issues)
+	}
+}
+
+func TestValidateJSONInvalid(t *testing.T) {
+	manifestPath := writeManifest(t, `
+resources:
+  - kind: file
+    name: a
+    depends_on: [b]
+    spec:
+      path: /tmp/a
+      content: a
+  - kind: file
+    name: b
+    depends_on: [a]
+    spec:
+      path: /tmp/b
+      content: b
+`)
+
+	stdout, stderr, code := runCLI(t, "dev", "validate", "--json", "--manifest", manifestPath)
+	if code != ExitCodeRuntimeError {
+		t.Fatalf("exit code = %d, want %d", code, ExitCodeRuntimeError)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr should be empty in JSON mode, got: %s", stderr)
+	}
+
+	var result validateOutput
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("JSON parse error: %v\noutput: %s", err, stdout)
+	}
+	if result.Valid {
+		t.Fatalf("valid = true, want false")
+	}
+	if len(result.Issues) == 0 {
+		t.Fatal("expected issues but got none")
+	}
+	if !strings.Contains(result.Issues[0].Message, "dependency cycle") {
+		t.Fatalf("issue message = %q, want cycle error", result.Issues[0].Message)
+	}
+}
+
+func TestPlanJSON(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "motd")
+	manifestPath := writeManifest(t, `
+resources:
+  - kind: file
+    name: motd
+    spec:
+      path: `+target+`
+      content: hello
+`)
+
+	stdout, stderr, code := runCLI(t, "dev", "plan", "--json", "-f", manifestPath)
+	if code != ExitCodeSuccess {
+		t.Fatalf("exit code = %d, want %d\nstderr: %s", code, ExitCodeSuccess, stderr)
+	}
+
+	var result planOutput
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("JSON parse error: %v\noutput: %s", err, stdout)
+	}
+	if len(result.Resources) != 1 {
+		t.Fatalf("resources count = %d, want 1", len(result.Resources))
+	}
+	r := result.Resources[0]
+	if r.Name != "motd" {
+		t.Fatalf("name = %q, want %q", r.Name, "motd")
+	}
+	if r.Kind != "file" {
+		t.Fatalf("kind = %q, want %q", r.Kind, "file")
+	}
+	if r.Status != "changed" {
+		t.Fatalf("status = %q, want %q", r.Status, "changed")
+	}
+	if !strings.Contains(r.Operations, "stdlib_file_write") {
+		t.Fatalf("operations missing stdlib_file_write: %s", r.Operations)
+	}
+}
+
+func TestPlanJSONConverged(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "motd")
+	os.WriteFile(target, []byte("hello"), 0o644)
+
+	manifestPath := writeManifest(t, `
+resources:
+  - kind: file
+    name: motd
+    spec:
+      path: `+target+`
+      content: hello
+`)
+
+	stdout, _, code := runCLI(t, "dev", "plan", "--json", "-f", manifestPath)
+	if code != ExitCodeSuccess {
+		t.Fatalf("exit code = %d", code)
+	}
+
+	var result planOutput
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("JSON parse error: %v\noutput: %s", err, stdout)
+	}
+	if len(result.Resources) != 1 {
+		t.Fatalf("resources count = %d, want 1", len(result.Resources))
+	}
+	if result.Resources[0].Status != "converged" {
+		t.Fatalf("status = %q, want %q", result.Resources[0].Status, "converged")
+	}
+}
+
+func TestApplyJSON(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "motd")
+	manifestPath := writeManifest(t, `
+resources:
+  - kind: file
+    name: motd
+    spec:
+      path: `+target+`
+      content: hello
+`)
+
+	stdout, stderr, code := runCLI(t, "dev", "apply", "--json", "-f", manifestPath)
+	if code != ExitCodeSuccess {
+		t.Fatalf("exit code = %d, want %d\nstdout: %s\nstderr: %s", code, ExitCodeSuccess, stdout, stderr)
+	}
+
+	var result applyOutput
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("JSON parse error: %v\noutput: %s", err, stdout)
+	}
+	if !result.Success {
+		t.Fatal("success = false, want true")
+	}
+	if len(result.Resources) != 1 {
+		t.Fatalf("resources count = %d, want 1", len(result.Resources))
+	}
+	r := result.Resources[0]
+	if r.Name != "motd" {
+		t.Fatalf("name = %q, want %q", r.Name, "motd")
+	}
+	if r.Status != "applied" {
+		t.Fatalf("status = %q, want %q", r.Status, "applied")
+	}
+}
+
+func TestApplyJSONIdempotent(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "motd")
+	manifestPath := writeManifest(t, `
+resources:
+  - kind: file
+    name: motd
+    spec:
+      path: `+target+`
+      content: hello
+`)
+
+	// First apply
+	runCLI(t, "dev", "apply", "-f", manifestPath)
+
+	// Second apply with --json — should show converged
+	stdout, _, code := runCLI(t, "dev", "apply", "--json", "-f", manifestPath)
+	if code != ExitCodeSuccess {
+		t.Fatalf("exit code = %d", code)
+	}
+
+	var result applyOutput
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("JSON parse error: %v\noutput: %s", err, stdout)
+	}
+	if !result.Success {
+		t.Fatal("success = false, want true")
+	}
+	if result.Resources[0].Status != "converged" {
+		t.Fatalf("status = %q, want %q", result.Resources[0].Status, "converged")
+	}
+}
+
+func TestDefaultOutputUnchanged(t *testing.T) {
+	manifestPath := writeManifest(t, `
+resources:
+  - kind: file
+    name: motd
+    spec:
+      path: /etc/motd
+      content: hello
+`)
+
+	// Validate without --json should produce human-readable output
+	stdout, _, _ := runCLI(t, "dev", "validate", "--manifest", manifestPath)
+	if !strings.Contains(stdout, "is valid") {
+		t.Fatalf("default validate should be human-readable: %s", stdout)
+	}
+	if strings.HasPrefix(strings.TrimSpace(stdout), "{") {
+		t.Fatal("default output should not be JSON")
 	}
 }
 
