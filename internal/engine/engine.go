@@ -152,7 +152,8 @@ func NewPlanner() *Planner {
 			"posix_acl":        posixACLProvider{},
 			"sudoers_entry":    sudoersEntryProvider{},
 			"systemd_service":  systemdServiceProvider{},
-			"systemd_unit":     systemdUnitProvider{},
+			"systemd_unit":      systemdUnitProvider{},
+			"docker_container":  dockerContainerProvider{},
 		},
 	}
 }

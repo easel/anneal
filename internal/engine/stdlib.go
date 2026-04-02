@@ -156,4 +156,30 @@ stdlib_service_mask() {
 stdlib_daemon_reload() {
   systemctl daemon-reload
 }
+
+stdlib_docker_stop() {
+  docker stop "$1" 2>/dev/null || true
+}
+
+stdlib_docker_rm() {
+  docker rm "$1" 2>/dev/null || true
+}
+
+stdlib_docker_run() {
+  docker run -d "$@"
+}
+
+stdlib_docker_health_check() {
+  _url="$1"; _timeout="${2:-30}"; _interval="${3:-2}"
+  _elapsed=0
+  while [ "$_elapsed" -lt "$_timeout" ]; do
+    if curl -sf "$_url" > /dev/null 2>&1; then
+      return 0
+    fi
+    sleep "$_interval"
+    _elapsed=$((_elapsed + _interval))
+  done
+  echo "health check failed: $_url did not respond within ${_timeout}s" >&2
+  return 1
+}
 `
