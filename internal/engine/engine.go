@@ -158,6 +158,8 @@ func NewPlanner() *Planner {
 			"crypttab_entry":    crypttabEntryProvider{},
 			"binary_install":    binaryInstallProvider{},
 			"command":           commandProvider{},
+			"zfs_dataset":       zfsDatasetProvider{},
+			"zfs_properties":    zfsPropertiesProvider{},
 		},
 	}
 }
