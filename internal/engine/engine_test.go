@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/erik/anneal/internal/manifest"
+	"github.com/easel/anneal/internal/manifest"
 )
 
 func TestPlannerValidateSortsDiamondsByDeclarationOrder(t *testing.T) {

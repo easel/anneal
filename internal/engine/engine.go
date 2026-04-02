@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/erik/anneal/internal/manifest"
+	"github.com/easel/anneal/internal/manifest"
 )
 
 type Planner struct {

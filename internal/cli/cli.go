@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/erik/anneal/internal/engine"
-	"github.com/erik/anneal/internal/manifest"
+	"github.com/easel/anneal/internal/engine"
+	"github.com/easel/anneal/internal/manifest"
 	"github.com/spf13/cobra"
 )
 

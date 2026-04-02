@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/erik/anneal/internal/cli"
+	"github.com/easel/anneal/internal/cli"
 )
 
 func main() {

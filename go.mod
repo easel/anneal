@@ -1,4 +1,4 @@
-module github.com/erik/anneal
+module github.com/easel/anneal
 
 go 1.26.0
 
