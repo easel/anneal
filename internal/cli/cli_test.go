@@ -212,10 +212,30 @@ resources:
 		t.Fatalf("apply with plan exit code = %d\nstdout: %s", code, stdout)
 	}
 
-	// Now change the target so state drifts, then try apply with old plan
-	os.WriteFile(target, []byte("different"), 0o644)
-	// Re-plan would show converged (file exists but content differs from original)
-	// Actually we need to change the manifest to create drift
+	// Now mutate the target so system state drifts from when the plan was saved.
+	// The file now exists with different content, so re-planning will produce a
+	// different script (content-changed instead of new-file), causing drift.
+	if err := os.WriteFile(target, []byte("different"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	// Apply with the stale saved plan should detect drift and abort.
+	_, stderr, code := runCLI(t, "dev", "apply", "-f", manifestPath, "--plan", planFile)
+	if code != ExitCodeRuntimeError {
+		t.Fatalf("apply with stale plan exit code = %d, want %d\nstderr: %s", code, ExitCodeRuntimeError, stderr)
+	}
+	if !strings.Contains(stderr, "plan drift detected") {
+		t.Fatalf("apply stderr = %q, want drift detection error", stderr)
+	}
+
+	// Verify nothing was executed — the file should still have the mutated content.
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if string(data) != "different" {
+		t.Fatalf("file content = %q, want %q (drift should prevent execution)", string(data), "different")
+	}
 }
 
 func writeManifest(t *testing.T, contents string) string {
