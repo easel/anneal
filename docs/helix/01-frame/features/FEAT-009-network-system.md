@@ -5,7 +5,7 @@ dun:
     - anneal.prd
     - FEAT-001
 ---
-# Feature Specification: FEAT-009 - Network & System
+# Feature Specification: FEAT-009 - System Utilities
 
 **Feature ID**: FEAT-009
 **Status**: Specified

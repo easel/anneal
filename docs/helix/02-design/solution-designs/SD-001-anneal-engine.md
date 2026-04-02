@@ -91,7 +91,12 @@ interpretation layer. Custom providers still need a contract language.
   - Include graph resolution with cycle detection.
   - Variable precedence: module defaults → root vars → host file → env vars.
   - Two-pass template evaluation: iterator expansion (pass 1), then variable
-    interpolation (pass 2).
+    interpolation (pass 2). Two passes are needed because `each` values may
+    contain template expressions that must expand before variable interpolation.
+  - Built-in template variables injected at pass 2: `{{ .Hostname }}`,
+    `{{ .FQDN }}`, `{{ .Arch }}` (Go arch), `{{ .DebArch }}` (Debian arch),
+    `{{ .KernelArch }}` (x86_64/aarch64 mapping), `{{ .OSVersion }}`. These
+    enable platform-adaptive URLs and conditionals.
   - Composite resource expansion into primitive resources.
   - Iterator (`each`) expansion into concrete resources.
 - **Interfaces**: Produces a flat list of resolved resources for the Engine.
@@ -115,11 +120,15 @@ interpretation layer. Custom providers still need a contract language.
   - `diff(spec, current_state) → changes`: compare desired to current.
   - `emit(changes) → stdlib_operations`: produce plan operations.
 - **Built-in providers**: Go types compiled into the binary. Cover: system
-  packages (apt, dnf), Homebrew, external repos, deb installs, global language
-  packages (npm, pip), users/groups/sudo/PAM, files/templates/directories/
-  symlinks, systemd services/units, Docker containers, ZFS datasets/properties,
-  Kerberos KDC/principals/keytabs, POSIX ACLs, hosts entries, crypttab,
-  binary installs from URLs, secret files, generic command.
+  packages (apt, dnf, pacman), Homebrew (formulae/casks/taps), external repos,
+  deb installs, global language packages (npm, pipx), users/groups/sudoers,
+  POSIX ACLs, files/templates/directories/symlinks, systemd services/units,
+  Docker containers, ZFS datasets/properties, Kerberos KDC/principals/keytabs,
+  hosts entries, crypttab, binary installs from URLs, secret files, generic
+  command.
+- **Run-as-user**: resources can specify a user to execute as. The provider
+  contract passes this through to stdlib operations. Required for Homebrew,
+  npm, pipx, and other tools that must not run as root.
 - **Custom providers**: Shell scripts implementing `read()`, `diff()`, `emit()`
   functions. Discovered from `providers/` directory relative to the manifest.
   Executed in the embedded interpreter.
@@ -149,10 +158,15 @@ interpretation layer. Custom providers still need a contract language.
 ### Component: Secret Provider Chain
 - **Purpose**: Resolve secret references to values at runtime.
 - **Responsibilities**:
+  - Pre-resolved secrets file (built-in): `anneal resolve-secrets` runs as the
+    unprivileged user (who has 1Password access) and writes a `.secrets.env`
+    file. Apply (running as root) reads from it. This handles the common case
+    where root cannot access the 1Password user session.
   - Environment variable provider (built-in): uppercased field name.
   - 1Password provider (built-in): `op item get` via CLI.
   - Custom providers (P1): shell scripts implementing a resolve function.
-  - Chain tries providers in order; first value wins.
+  - Chain tries providers in order: pre-resolved file → env vars → 1Password →
+    custom → fail. First value wins.
   - Secrets never appear in plan output or logs — replaced with `(secret)`.
   - Auto-generation: if no provider resolves and `generate` is set, run the
     generate command and warn the operator to store the result.

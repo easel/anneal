@@ -65,7 +65,7 @@ notify/trigger system.
 
 ## User Stories
 
-### US-005: Compose a host from modules [FEAT-002]
+### US-007: Compose a host from modules [FEAT-002]
 **As a** server operator managing multiple hosts
 **I want** to share configuration modules across hosts
 **So that** I don't duplicate manifest content for common patterns
@@ -76,7 +76,7 @@ notify/trigger system.
 - [ ] Included manifests can include further manifests (nesting).
 - [ ] `anneal validate` detects circular includes.
 
-### US-006: Override variables per host [FEAT-002]
+### US-008: Override variables per host [FEAT-002]
 **As a** operator with multiple hosts sharing a base manifest
 **I want** host-specific variable overrides
 **So that** the same modules work across hosts with different IPs, hostnames, etc.
@@ -86,7 +86,7 @@ notify/trigger system.
 - [ ] Environment variables override all manifest-level variables.
 - [ ] The precedence chain is documented and deterministic.
 
-### US-007: Iterate over a list [FEAT-002]
+### US-009: Iterate over a list [FEAT-002]
 **As a** operator configuring multiple similar resources
 **I want** to declare one resource with `each` and have it expand
 **So that** I avoid repeating the same resource declaration
@@ -96,7 +96,7 @@ notify/trigger system.
 - [ ] The iterator value is accessible in the resource's `name` and `spec`.
 - [ ] Expansion happens before dependency resolution.
 
-### US-008: Trigger a restart on config change [FEAT-002]
+### US-010: Trigger a restart on config change [FEAT-002]
 **As a** operator deploying a config file for a service
 **I want** the service to restart only if the config actually changed
 **So that** I avoid unnecessary service disruption

@@ -6,8 +6,8 @@ dun:
 
 Anneal is a declarative host configuration engine. One static binary reads a
 manifest, diffs it against actual system state, and produces an executable plan
-that converges the machine — Terraform's plan/apply workflow, applied to
-OS-level configuration.
+that converges the machine — Terraform's plan/apply workflow and Kubernetes'
+resource model, applied to OS-level configuration.
 
 The name comes from metallurgical annealing: heating metal and cooling it under
 controlled conditions to reach a stable, desired crystalline state. Anneal does

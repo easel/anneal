@@ -45,8 +45,14 @@ workflow, the provider contract, the standard library, and the execution model.
   embedded interpreter.
 - Providers implement a read/diff/emit contract. Built-in providers are compiled
   in. Custom providers are shell scripts discovered from the manifest directory.
+- Resources can specify a `run_as` user. The provider's operations execute as
+  that user instead of root. Required for Homebrew, npm, pipx, and other tools
+  that must not run as root.
 - The standard library defines the set of operations that appear in plans. Both
   built-in and custom providers emit from the same stdlib.
+- Built-in template variables are available in manifests and templates:
+  hostname, FQDN, architecture (in Go, Debian, and kernel naming conventions),
+  and OS version. These enable URLs and conditionals that adapt to the host.
 - Fail-stop: execution halts on the first error. Output identifies the failing
   resource, the operation that failed, and what was already applied.
 - The embedded interpreter runs custom providers and executes plans without
@@ -115,6 +121,10 @@ workflow, the provider contract, the standard library, and the execution model.
 - [ ] `anneal plan` renders secret values as `(secret)` in plan output.
 - [ ] `anneal apply` resolves secret references at execution time via the
   provider chain (env vars → 1Password).
+- [ ] Supports pre-resolved secrets: `anneal resolve-secrets` runs as the
+  unprivileged user (who has 1Password access), writes a secrets env file,
+  then `anneal apply` (running as root) reads from it. This handles the
+  common case where root cannot access the 1Password user session.
 - [ ] If a secret is not found and not marked optional, apply fails with a clear
   message naming the missing secret.
 - [ ] Auto-generated secrets: if `generate` is set and no provider resolves the

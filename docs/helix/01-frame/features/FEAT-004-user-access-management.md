@@ -59,6 +59,7 @@ other resources (files, services, storage) depend on users and groups existing.
 - [ ] Missing users produce `stdlib_user_create` operations.
 - [ ] Existing users with correct properties produce no operations.
 - [ ] Supports name, primary group, shell, system flag.
+- [ ] Existing users with wrong shell or group produce modify operations.
 
 ### US-021: Create system groups [FEAT-004]
 **As a** server operator

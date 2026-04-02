@@ -91,6 +91,17 @@ packages.
 - [ ] Missing packages produce `stdlib_brew_install` operations.
 - [ ] Casks are distinguished from formulae in the resource spec.
 - [ ] Homebrew itself is treated as a prerequisite (error if not installed).
+- [ ] All brew operations run as the unprivileged user, not root.
+
+### US-013b: Manage Homebrew taps [FEAT-003]
+**As a** workstation operator
+**I want** to declare Homebrew taps as resources
+**So that** third-party taps are configured before formulae that depend on them
+
+**Acceptance Criteria:**
+- [ ] `brew_tap` provider checks currently tapped repos.
+- [ ] Missing taps produce `stdlib_brew_tap` operations.
+- [ ] Resources depending on a tap are ordered after it via DAG.
 
 ### US-014: Install packages from .deb files [FEAT-003]
 **As a** operator installing vendor-provided .deb packages
@@ -121,15 +132,37 @@ packages.
 - [ ] `npm_packages` provider reads from `npm list -g`.
 - [ ] Missing packages produce `stdlib_npm_install` operations.
 
-### US-017: Install global pip packages [FEAT-003]
+### US-017: Install global Python packages [FEAT-003]
 **As a** developer provisioning a workstation
-**I want** to declare global pip packages
-**So that** Python CLI tools are managed alongside other packages
+**I want** to declare global Python CLI tools
+**So that** Python tools are managed alongside other packages
 
 **Acceptance Criteria:**
-- [ ] `pip_packages` provider reads from `pip list`.
-- [ ] Missing packages produce `stdlib_pip_install` operations.
-- [ ] Supports specifying a Python version or virtualenv path.
+- [ ] `python_packages` provider uses pipx by default (PEP 668 compliance —
+  raw `pip install -g` is broken on modern Ubuntu/Fedora).
+- [ ] Reads from `pipx list` to check installed state.
+- [ ] Missing packages produce `stdlib_pipx_install` operations.
+- [ ] All operations run as the unprivileged user, not root.
+
+### US-018: Pre-seed debconf before package install [FEAT-003]
+**As a** server operator installing packages that prompt for config
+**I want** to declare debconf pre-seeding values
+**So that** packages like krb5-config install non-interactively
+
+**Acceptance Criteria:**
+- [ ] `apt_packages` supports an optional `debconf` field with preseed values.
+- [ ] Debconf values are set before the package install operation.
+- [ ] Already-set debconf values produce no operations.
+
+### US-019: Manage Arch Linux packages [FEAT-003]
+**As a** operator running Arch Linux
+**I want** pacman package management
+**So that** the same manifest patterns work on Arch
+
+**Acceptance Criteria:**
+- [ ] `pacman_packages` provider reads from pacman database.
+- [ ] Missing packages produce `stdlib_pacman_install` operations.
+- [ ] Supports AUR packages via a configured AUR helper (paru/yay).
 
 ## Edge Cases and Error Handling
 
@@ -154,10 +187,13 @@ packages.
 - Core engine (FEAT-001): provider contract, stdlib.
 - stdlib operations: `stdlib_apt_install`, `stdlib_apt_purge`,
   `stdlib_deb_install`, `stdlib_dnf_install`, `stdlib_brew_install`,
-  `stdlib_npm_install`, `stdlib_pip_install`.
+  `stdlib_brew_tap`, `stdlib_npm_install`, `stdlib_pipx_install`,
+  `stdlib_pacman_install`.
+- Run-as-user support (PRD P0-14): brew, npm, pipx must run as unprivileged user.
 
 ## Out of Scope
 
 - Package version pinning with constraint ranges (e.g., `>= 1.2, < 2.0`).
-- Automatic Homebrew installation.
+- Automatic Homebrew installation (bootstrap is a custom provider or script_install).
 - pip/npm project-local dependencies (only global packages).
+- Coursier/Scala packages (custom provider).

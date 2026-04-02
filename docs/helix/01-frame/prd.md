@@ -101,7 +101,7 @@ tools are overkill
    - FEAT-006: Service Management (systemd services/units, Docker containers)
    - FEAT-007: Storage Management (ZFS datasets, ZFS properties)
    - FEAT-008: Authentication (Kerberos KDC, principals, keytabs)
-   - FEAT-009: Network & System (hosts entries, crypttab, binary installs,
+   - FEAT-009: System Utilities (hosts entries, crypttab, binary installs,
      generic command)
 5. **Custom resource providers via shell scripts.** Users can add new resource
    kinds without recompiling. Custom providers implement the same contract as
@@ -123,10 +123,17 @@ tools are overkill
     resources from a single declaration.
 13. **Secret management.** Secrets referenced by name, never stored in manifests,
     never shown in plans. Resolution chain: environment variables → 1Password →
-    fail (or empty if optional). Auto-generation for first-run secrets.
-14. **Fail-stop execution.** Stop on first error. Report what was applied, what
+    fail (or empty if optional). Auto-generation for first-run secrets. Must
+    support pre-resolved secrets (resolve as unprivileged user before apply runs
+    as root, since root may not have 1Password session access).
+14. **Run-as-user support.** Resources can specify a user to run operations as.
+    Required for Homebrew, npm, pip, and other tools that must not run as root.
+15. **Fail-stop execution.** Stop on first error. Report what was applied, what
     was skipped, and sufficient context to diagnose the failure.
-15. **Single binary install.** One file, no runtime dependencies beyond the OS.
+16. **Single binary install.** One file, no runtime dependencies beyond the OS.
+17. **Built-in template variables.** Manifests and templates have access to
+    system-derived variables: hostname, FQDN, architecture (Go, Debian, and
+    kernel naming conventions), and OS version.
 
 ### Should Have (P1)
 
@@ -144,7 +151,25 @@ tools are overkill
 6. **Custom secret providers.** Shell-script secret backends extending the
    resolution chain beyond env and 1Password.
 7. **Plan comparison.** Diff two plan files to see what changed between runs.
-8. **iSCSI provider.** ZFS zvol + LIO targetcli management for iSCSI targets.
+8. **iSCSI provider.** ZFS zvol + LIO targetcli management for iSCSI targets
+   (FEAT-010).
+9. **Fact gathering.** Auto-detected system facts (OS family, distro, version,
+   architecture, network interfaces, memory, disk layout) available as template
+   variables. Enables manifests that adapt to the host without manual variable
+   overrides. Required for multi-platform support.
+10. **Inter-resource references.** A resource's spec can reference another
+    resource's output (e.g., read a generated secret, capture a command's
+    stdout). Needed for workflows where one resource produces a value consumed
+    by another.
+11. **macOS provider tier.** Homebrew (formulae/casks/taps), launchd services,
+    plist management, dscl user management. Required for the sahara reference
+    deployment's macOS targets.
+12. **Line-in-file / block-in-file.** Manage individual lines or blocks within
+    existing files without rewriting the whole file. Required for sshd_config,
+    shell profiles, and similar managed-by-others files.
+13. **Conditional resources.** A `when:` clause on resources for conditional
+    inclusion based on facts or variables, beyond what template `{{ if }}`
+    blocks can express.
 
 ### Nice to Have (P2)
 
@@ -153,8 +178,8 @@ tools are overkill
 3. **Partial apply.** Apply a subset of a plan's operations.
 4. **Dry-run execution.** Execute the plan with a standard library that logs
    operations instead of performing them.
-5. **macOS provider tier.** Package manager, launch daemon, and plist providers
-   using the same extension interface.
+5. **Encrypted variable files.** Encrypt secrets at rest in git-committed
+   variable files (analogous to Ansible Vault).
 
 ## Constraints, Assumptions, Dependencies
 
