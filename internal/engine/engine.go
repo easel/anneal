@@ -142,8 +142,10 @@ func NewPlanner() *Planner {
 			"apt_purge":     aptPurgeProvider{},
 			"apt_repo":      aptRepoProvider{},
 			"deb_install":   debInstallProvider{},
-			"brew_packages": brewPackagesProvider{},
-			"brew_tap":      brewTapProvider{},
+			"brew_packages":    brewPackagesProvider{},
+			"brew_tap":         brewTapProvider{},
+			"dnf_packages":     dnfPackagesProvider{},
+			"pacman_packages":  pacmanPackagesProvider{},
 		},
 	}
 }

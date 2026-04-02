@@ -81,4 +81,17 @@ stdlib_brew_tap() {
   _user="$1"; _tap="$2"
   sudo -u "$_user" brew tap "$_tap"
 }
+
+stdlib_dnf_install() {
+  dnf install -y "$@"
+}
+
+stdlib_pacman_install() {
+  pacman -S --noconfirm --needed "$@"
+}
+
+stdlib_aur_install() {
+  _user="$1"; _helper="$2"; shift 2
+  sudo -u "$_user" "$_helper" -S --noconfirm --needed "$@"
+}
 `
