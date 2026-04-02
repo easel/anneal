@@ -98,6 +98,7 @@ func newRootCmd(stdout, stderr io.Writer, version string) *cobra.Command {
 	root.AddCommand(newValidateCmd(&opts))
 	root.AddCommand(newPlanCmd(&opts))
 	root.AddCommand(newApplyCmd(&opts))
+	root.AddCommand(newProvidersCmd())
 	root.AddCommand(newVersionCmd(version))
 
 	return root
@@ -296,6 +297,48 @@ func newVersionCmd(version string) *cobra.Command {
 			fmt.Fprintln(cmd.OutOrStdout(), version)
 		},
 	}
+}
+
+func newProvidersCmd() *cobra.Command {
+	var jsonOutput bool
+	cmd := &cobra.Command{
+		Use:   "providers [kind]",
+		Short: "List available providers and their spec schemas",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			registry := engine.ProviderRegistry()
+
+			if len(args) == 1 {
+				kind := args[0]
+				for _, info := range registry {
+					if info.Kind == kind {
+						if jsonOutput {
+							return writeJSON(cmd.OutOrStdout(), info)
+						}
+						fmt.Fprintf(cmd.OutOrStdout(), "Provider: %s\n", info.Kind)
+						fmt.Fprintf(cmd.OutOrStdout(), "Description: %s\n", info.Description)
+						fmt.Fprintf(cmd.OutOrStdout(), "Required fields: %s\n", strings.Join(info.RequiredFields, ", "))
+						if len(info.OptionalFields) > 0 {
+							fmt.Fprintf(cmd.OutOrStdout(), "Optional fields: %s\n", strings.Join(info.OptionalFields, ", "))
+						}
+						return nil
+					}
+				}
+				return fmt.Errorf("unknown provider kind: %s", kind)
+			}
+
+			if jsonOutput {
+				return writeJSON(cmd.OutOrStdout(), registry)
+			}
+
+			for _, info := range registry {
+				fmt.Fprintf(cmd.OutOrStdout(), "%-20s %s\n", info.Kind, info.Description)
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output structured JSON")
+	return cmd
 }
 
 // JSON output types for --json flag.

@@ -446,6 +446,84 @@ resources:
 	}
 }
 
+// --- Providers command tests ---
+
+func TestProvidersListAll(t *testing.T) {
+	stdout, stderr, code := runCLI(t, "dev", "providers")
+	if code != ExitCodeSuccess {
+		t.Fatalf("exit code = %d, want %d\nstderr: %s", code, ExitCodeSuccess, stderr)
+	}
+	// Should list known providers
+	for _, kind := range []string{"file", "directory", "apt_packages", "docker_container", "command"} {
+		if !strings.Contains(stdout, kind) {
+			t.Errorf("providers output missing %q", kind)
+		}
+	}
+}
+
+func TestProvidersListJSON(t *testing.T) {
+	stdout, _, code := runCLI(t, "dev", "providers", "--json")
+	if code != ExitCodeSuccess {
+		t.Fatalf("exit code = %d", code)
+	}
+
+	var result []map[string]any
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("JSON parse error: %v\noutput: %s", err, stdout)
+	}
+	if len(result) == 0 {
+		t.Fatal("expected provider entries but got none")
+	}
+	// Verify structure of first entry
+	first := result[0]
+	for _, field := range []string{"kind", "description", "required_fields"} {
+		if _, ok := first[field]; !ok {
+			t.Errorf("provider entry missing field %q", field)
+		}
+	}
+}
+
+func TestProvidersDetailHuman(t *testing.T) {
+	stdout, _, code := runCLI(t, "dev", "providers", "file")
+	if code != ExitCodeSuccess {
+		t.Fatalf("exit code = %d", code)
+	}
+	if !strings.Contains(stdout, "Provider: file") {
+		t.Fatalf("output missing provider name: %s", stdout)
+	}
+	if !strings.Contains(stdout, "path") {
+		t.Fatalf("output missing required field 'path': %s", stdout)
+	}
+	if !strings.Contains(stdout, "content") {
+		t.Fatalf("output missing required field 'content': %s", stdout)
+	}
+}
+
+func TestProvidersDetailJSON(t *testing.T) {
+	stdout, _, code := runCLI(t, "dev", "providers", "--json", "file")
+	if code != ExitCodeSuccess {
+		t.Fatalf("exit code = %d", code)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal([]byte(stdout), &result); err != nil {
+		t.Fatalf("JSON parse error: %v\noutput: %s", err, stdout)
+	}
+	if result["kind"] != "file" {
+		t.Fatalf("kind = %v, want 'file'", result["kind"])
+	}
+}
+
+func TestProvidersUnknownKind(t *testing.T) {
+	_, stderr, code := runCLI(t, "dev", "providers", "nonexistent")
+	if code != ExitCodeRuntimeError {
+		t.Fatalf("exit code = %d, want %d", code, ExitCodeRuntimeError)
+	}
+	if !strings.Contains(stderr, "unknown provider kind") {
+		t.Fatalf("stderr = %q, want unknown kind error", stderr)
+	}
+}
+
 func TestDefaultOutputUnchanged(t *testing.T) {
 	manifestPath := writeManifest(t, `
 resources:
