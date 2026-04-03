@@ -243,6 +243,70 @@ emit() {
 	}
 }
 
+func TestShellProviderPlan_HyphenatedSpecKeys(t *testing.T) {
+	// A provider that reads a hyphenated spec key via the sanitized env var name.
+	sp := &ShellProvider{
+		Kind:       "env_test",
+		ScriptPath: "/tmp/providers/env_test.sh",
+		Script: `
+read() {
+  echo "none"
+}
+
+diff() {
+  echo "changed"
+}
+
+emit() {
+  echo "echo mykey=$ANNEAL_SPEC_MY_KEY otherkey=$ANNEAL_SPEC_OTHER_KEY"
+}
+`,
+	}
+
+	resource := manifest.ResolvedResource{
+		Kind: "env_test",
+		Name: "test-resource",
+		Spec: map[string]any{
+			"my-key":    "hello",
+			"other.key": "world",
+		},
+	}
+
+	ops, err := sp.Plan(resource)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(ops) == 0 {
+		t.Fatal("expected operations, got none")
+	}
+	if !strings.Contains(ops[0], "mykey=hello") {
+		t.Errorf("expected ops to contain hyphenated key value, got %q", ops[0])
+	}
+	if !strings.Contains(ops[0], "otherkey=world") {
+		t.Errorf("expected ops to contain dotted key value, got %q", ops[0])
+	}
+}
+
+func TestSanitizeEnvKey(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"MY_KEY", "MY_KEY"},
+		{"MY-KEY", "MY_KEY"},
+		{"OTHER.KEY", "OTHER_KEY"},
+		{"A B C", "A_B_C"},
+		{"KEY123", "KEY123"},
+		{"123KEY", "123KEY"},
+	}
+	for _, tc := range tests {
+		got := sanitizeEnvKey(tc.input)
+		if got != tc.want {
+			t.Errorf("sanitizeEnvKey(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}
+
 func TestRegisterProvider_DuplicateKind(t *testing.T) {
 	planner := NewPlanner()
 	sp := &ShellProvider{Kind: "file", ScriptPath: "/tmp/file.sh", Script: ""}

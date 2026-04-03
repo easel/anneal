@@ -92,7 +92,7 @@ func (sp *ShellProvider) buildPlanScript(specJSON string, spec map[string]any) s
 			b, _ := json.Marshal(v)
 			strVal = string(b)
 		}
-		envKey := "ANNEAL_SPEC_" + strings.ToUpper(key)
+		envKey := "ANNEAL_SPEC_" + sanitizeEnvKey(strings.ToUpper(key))
 		buf.WriteString(fmt.Sprintf("%s=%s\n", envKey, shellQuote(strVal)))
 		buf.WriteString(fmt.Sprintf("export %s\n", envKey))
 	}
@@ -188,4 +188,20 @@ func ValidateShellProvider(sp *ShellProvider) error {
 			sp.Kind, filepath.Base(sp.ScriptPath), strings.Join(missing, ", "))
 	}
 	return nil
+}
+
+// sanitizeEnvKey replaces characters that are invalid in POSIX shell variable
+// names with underscores. Valid characters are [A-Z0-9_]; the caller is
+// expected to pass an already-uppercased key.
+func sanitizeEnvKey(key string) string {
+	var buf strings.Builder
+	buf.Grow(len(key))
+	for _, r := range key {
+		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
+			buf.WriteRune(r)
+		} else {
+			buf.WriteByte('_')
+		}
+	}
+	return buf.String()
 }
