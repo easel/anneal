@@ -128,6 +128,16 @@ type Provider interface {
 	Plan(resource manifest.ResolvedResource) ([]string, error)
 }
 
+// RegisterProvider adds a provider to the planner. If a provider with the
+// same kind already exists, it returns an error to prevent silent shadowing.
+func (p *Planner) RegisterProvider(kind string, provider Provider) error {
+	if _, exists := p.providers[kind]; exists {
+		return fmt.Errorf("provider kind %q already registered", kind)
+	}
+	p.providers[kind] = provider
+	return nil
+}
+
 func NewPlanner() *Planner {
 	return &Planner{
 		providers: map[string]Provider{

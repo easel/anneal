@@ -1,6 +1,10 @@
 package engine
 
-import "sort"
+import (
+	"fmt"
+	"path/filepath"
+	"sort"
+)
 
 // ProviderInfo describes a registered provider's metadata for discovery.
 type ProviderInfo struct {
@@ -8,6 +12,8 @@ type ProviderInfo struct {
 	Description    string   `json:"description"`
 	RequiredFields []string `json:"required_fields"`
 	OptionalFields []string `json:"optional_fields,omitempty"`
+	Custom         bool     `json:"custom,omitempty"`
+	ScriptPath     string   `json:"script_path,omitempty"`
 }
 
 // ProviderRegistry returns metadata for all registered providers, sorted by kind.
@@ -45,6 +51,24 @@ func ProviderRegistry() []ProviderInfo {
 		{Kind: "kerberos_kdc", Description: "Initialize a Kerberos KDC database", RequiredFields: []string{"realm", "master_password"}, OptionalFields: []string{"db_path"}},
 		{Kind: "kerberos_principal", Description: "Create Kerberos principals idempotently", RequiredFields: []string{"principal"}, OptionalFields: []string{"randkey", "password"}},
 		{Kind: "kerberos_keytab", Description: "Export Kerberos principals to a keytab file", RequiredFields: []string{"path", "principals"}, OptionalFields: []string{"mode"}},
+	}
+	sort.Slice(infos, func(i, j int) bool {
+		return infos[i].Kind < infos[j].Kind
+	})
+	return infos
+}
+
+// ProviderRegistryWithCustom returns metadata for all built-in providers plus
+// any discovered custom shell providers, sorted by kind.
+func ProviderRegistryWithCustom(customProviders []*ShellProvider) []ProviderInfo {
+	infos := ProviderRegistry()
+	for _, sp := range customProviders {
+		infos = append(infos, ProviderInfo{
+			Kind:        sp.Kind,
+			Description: fmt.Sprintf("Custom shell provider (%s)", filepath.Base(sp.ScriptPath)),
+			Custom:      true,
+			ScriptPath:  sp.ScriptPath,
+		})
 	}
 	sort.Slice(infos, func(i, j int) bool {
 		return infos[i].Kind < infos[j].Kind

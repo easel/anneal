@@ -98,7 +98,7 @@ func newRootCmd(stdout, stderr io.Writer, version string) *cobra.Command {
 	root.AddCommand(newValidateCmd(&opts))
 	root.AddCommand(newPlanCmd(&opts))
 	root.AddCommand(newApplyCmd(&opts))
-	root.AddCommand(newProvidersCmd())
+	root.AddCommand(newProvidersCmd(&opts))
 	root.AddCommand(newGenerateCmd())
 	root.AddCommand(newMergeCmd())
 	root.AddCommand(newVersionCmd(version))
@@ -129,7 +129,20 @@ func newValidateCmd(opts *options) *cobra.Command {
 				}
 				return err
 			}
-			if err := engine.NewPlanner().Validate(resolved.Resources); err != nil {
+			planner, _, pErr := newPlannerWithCustomProviders(opts.manifestPath)
+			if pErr != nil {
+				if jsonOutput {
+					if wErr := writeJSON(cmd.OutOrStdout(), validateOutput{
+						Valid:  false,
+						Issues: []validateIssue{{Level: "error", Message: pErr.Error()}},
+					}); wErr != nil {
+						return wErr
+					}
+					return &exitError{code: ExitCodeRuntimeError, err: pErr, silent: true}
+				}
+				return pErr
+			}
+			if err := planner.Validate(resolved.Resources); err != nil {
 				if jsonOutput {
 					if wErr := writeJSON(cmd.OutOrStdout(), validateOutput{
 						Valid:  false,
@@ -182,8 +195,13 @@ func newPlanCmd(opts *options) *cobra.Command {
 				w = f
 			}
 
+			planner, _, pErr := newPlannerWithCustomProviders(opts.manifestPath)
+			if pErr != nil {
+				return pErr
+			}
+
 			if jsonOutput {
-				plan, err := engine.NewPlanner().BuildPlan(resolved.Resources)
+				plan, err := planner.BuildPlan(resolved.Resources)
 				if err != nil {
 					return err
 				}
@@ -203,7 +221,7 @@ func newPlanCmd(opts *options) *cobra.Command {
 				}
 				return writeJSON(w, planOutput{Resources: resources})
 			}
-			plan, err := engine.NewPlanner().Build(resolved.Resources)
+			plan, err := planner.Build(resolved.Resources)
 			if err != nil {
 				return err
 			}
@@ -235,7 +253,10 @@ func newApplyCmd(opts *options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			planner := engine.NewPlanner()
+			planner, _, pErr := newPlannerWithCustomProviders(opts.manifestPath)
+			if pErr != nil {
+				return pErr
+			}
 
 			var savedScript string
 			if planFile != "" {
@@ -315,14 +336,15 @@ func newVersionCmd(version string) *cobra.Command {
 	}
 }
 
-func newProvidersCmd() *cobra.Command {
+func newProvidersCmd(opts *options) *cobra.Command {
 	var jsonOutput bool
 	cmd := &cobra.Command{
 		Use:   "providers [kind]",
 		Short: "List available providers and their spec schemas",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			registry := engine.ProviderRegistry()
+			customProviders, _ := engine.DiscoverShellProviders(opts.manifestPath)
+			registry := engine.ProviderRegistryWithCustom(customProviders)
 
 			if len(args) == 1 {
 				kind := args[0]
@@ -397,6 +419,26 @@ func writeJSON(w io.Writer, v any) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(v)
+}
+
+// newPlannerWithCustomProviders creates a Planner with built-in providers and
+// any custom shell providers discovered relative to the manifest path.
+// It validates that custom provider scripts define the required functions.
+func newPlannerWithCustomProviders(manifestPath string) (*engine.Planner, []*engine.ShellProvider, error) {
+	planner := engine.NewPlanner()
+	customProviders, err := engine.DiscoverShellProviders(manifestPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("discover custom providers: %w", err)
+	}
+	for _, sp := range customProviders {
+		if err := engine.ValidateShellProvider(sp); err != nil {
+			return nil, nil, err
+		}
+		if err := planner.RegisterProvider(sp.Kind, sp); err != nil {
+			return nil, nil, err
+		}
+	}
+	return planner, customProviders, nil
 }
 
 func currentEnv() map[string]string {
