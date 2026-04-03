@@ -72,8 +72,19 @@ type Builtins struct {
 var nonEnvCharPattern = regexp.MustCompile(`[^A-Za-z0-9]+`)
 
 // Load loads a manifest and recursively resolves includes with cycle detection.
+// Diamond includes (same file reached from multiple parents) are deduplicated:
+// the first occurrence's resources and vars are used; subsequent occurrences are
+// skipped. This matches SD-001's "include graph resolution" semantics.
 func Load(path string) (*Manifest, error) {
-	return loadWithIncludes(path, nil)
+	seen := map[string]bool{}
+	m, err := loadWithIncludes(path, nil, seen)
+	if err != nil {
+		return nil, err
+	}
+	if err := m.ValidateMerged(); err != nil {
+		return nil, fmt.Errorf("load manifest %s: %w", path, err)
+	}
+	return m, nil
 }
 
 // loadSingle loads and validates a single manifest file without processing includes.
@@ -100,19 +111,29 @@ func loadSingle(path string) (*Manifest, error) {
 }
 
 // loadWithIncludes recursively loads a manifest and its includes, detecting cycles.
-func loadWithIncludes(path string, visited []string) (*Manifest, error) {
+// visited tracks the current include chain (per-branch) for cycle detection.
+// seen tracks all resolved absolute paths (shared across branches) for diamond deduplication.
+func loadWithIncludes(path string, visited []string, seen map[string]bool) (*Manifest, error) {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return nil, fmt.Errorf("resolve path %s: %w", path, err)
 	}
 
-	// Cycle detection
+	// Cycle detection: check the current branch for a back-edge.
 	for _, v := range visited {
 		if v == absPath {
 			chain := append(append([]string{}, visited...), absPath)
 			return nil, fmt.Errorf("circular include detected: %s", strings.Join(chain, " → "))
 		}
 	}
+
+	// Diamond deduplication: if this path was already fully resolved via
+	// another branch, return an empty manifest so its resources and vars
+	// are not duplicated. The first branch to reach a file wins.
+	if seen[absPath] {
+		return &Manifest{}, nil
+	}
+	seen[absPath] = true
 
 	raw, err := loadSingle(path)
 	if err != nil {
@@ -138,7 +159,7 @@ func loadWithIncludes(path string, visited []string) (*Manifest, error) {
 			incPath = filepath.Join(dir, incPath)
 		}
 
-		child, err := loadWithIncludes(incPath, newVisited)
+		child, err := loadWithIncludes(incPath, newVisited, seen)
 		if err != nil {
 			return nil, fmt.Errorf("include %s: %w", inc.Path, err)
 		}
@@ -208,6 +229,19 @@ func (m *Manifest) Validate() error {
 		}
 	}
 
+	return nil
+}
+
+// ValidateMerged checks constraints that only apply after include merging,
+// such as duplicate resource names across included manifests.
+func (m *Manifest) ValidateMerged() error {
+	seen := map[string]int{}
+	for idx, resource := range m.Resources {
+		if prev, exists := seen[resource.Name]; exists {
+			return fmt.Errorf("duplicate resource name %q (resource %d and %d)", resource.Name, prev, idx)
+		}
+		seen[resource.Name] = idx
+	}
 	return nil
 }
 

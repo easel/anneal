@@ -445,6 +445,274 @@ resources:
 	}
 }
 
+func TestIncludeDiamondDeduplication(t *testing.T) {
+	dir := t.TempDir()
+
+	// Shared module included by both A and B (diamond pattern)
+	writeFile(t, filepath.Join(dir, "shared.yaml"), `
+vars:
+  shared_var: from-shared
+resources:
+  - kind: file
+    name: shared-resource
+    spec:
+      path: /tmp/shared
+      content: shared
+`)
+
+	writeFile(t, filepath.Join(dir, "a.yaml"), `
+includes:
+  - path: shared.yaml
+resources:
+  - kind: file
+    name: a-resource
+    spec:
+      path: /tmp/a
+      content: a
+`)
+
+	writeFile(t, filepath.Join(dir, "b.yaml"), `
+includes:
+  - path: shared.yaml
+resources:
+  - kind: file
+    name: b-resource
+    spec:
+      path: /tmp/b
+      content: b
+`)
+
+	root := writeFile(t, filepath.Join(dir, "root.yaml"), `
+includes:
+  - path: a.yaml
+  - path: b.yaml
+resources:
+  - kind: file
+    name: root-resource
+    spec:
+      path: /tmp/root
+      content: root
+`)
+
+	m, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	// shared-resource should appear only once (from the A branch, first to reach it)
+	if len(m.Resources) != 4 {
+		names := make([]string, len(m.Resources))
+		for i, r := range m.Resources {
+			names[i] = r.Name
+		}
+		t.Fatalf("len(Resources) = %d, want 4 (diamond dedup); names = %v", len(m.Resources), names)
+	}
+
+	// Order: shared (via a) → a → b → root
+	wantNames := []string{"shared-resource", "a-resource", "b-resource", "root-resource"}
+	for i, want := range wantNames {
+		if m.Resources[i].Name != want {
+			t.Errorf("resource[%d].Name = %q, want %q", i, m.Resources[i].Name, want)
+		}
+	}
+
+	// Shared var should be present
+	if got := m.Vars["shared_var"]; got != "from-shared" {
+		t.Errorf("vars[shared_var] = %v, want from-shared", got)
+	}
+}
+
+func TestIncludeDuplicateResourceNameError(t *testing.T) {
+	dir := t.TempDir()
+
+	writeFile(t, filepath.Join(dir, "module_a.yaml"), `
+resources:
+  - kind: file
+    name: conflicting-name
+    spec:
+      path: /tmp/a
+      content: a
+`)
+
+	writeFile(t, filepath.Join(dir, "module_b.yaml"), `
+resources:
+  - kind: file
+    name: conflicting-name
+    spec:
+      path: /tmp/b
+      content: b
+`)
+
+	root := writeFile(t, filepath.Join(dir, "root.yaml"), `
+includes:
+  - path: module_a.yaml
+  - path: module_b.yaml
+resources:
+  - kind: file
+    name: root-resource
+    spec:
+      path: /tmp/root
+      content: root
+`)
+
+	_, err := Load(root)
+	if err == nil {
+		t.Fatal("Load() expected error for duplicate resource name")
+	}
+	if !strings.Contains(err.Error(), "duplicate resource name") {
+		t.Fatalf("error = %q, want containing 'duplicate resource name'", err)
+	}
+	if !strings.Contains(err.Error(), "conflicting-name") {
+		t.Fatalf("error = %q, want containing resource name 'conflicting-name'", err)
+	}
+}
+
+func TestIncludeDiamondWithVarOverrides(t *testing.T) {
+	dir := t.TempDir()
+
+	writeFile(t, filepath.Join(dir, "shared.yaml"), `
+vars:
+  port: "8080"
+resources:
+  - kind: file
+    name: shared
+    spec:
+      path: /tmp/shared
+      content: ok
+`)
+
+	writeFile(t, filepath.Join(dir, "a.yaml"), `
+includes:
+  - path: shared.yaml
+    vars:
+      port: "9090"
+resources:
+  - kind: file
+    name: a
+    spec:
+      path: /tmp/a
+      content: ok
+`)
+
+	writeFile(t, filepath.Join(dir, "b.yaml"), `
+includes:
+  - path: shared.yaml
+    vars:
+      port: "7070"
+resources:
+  - kind: file
+    name: b
+    spec:
+      path: /tmp/b
+      content: ok
+`)
+
+	root := writeFile(t, filepath.Join(dir, "root.yaml"), `
+includes:
+  - path: a.yaml
+  - path: b.yaml
+resources:
+  - kind: file
+    name: root
+    spec:
+      path: /tmp/root
+      content: ok
+`)
+
+	m, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	// First branch (a) reaches shared first, so a's override of port wins
+	if got := m.Vars["port"]; got != "9090" {
+		t.Errorf("vars[port] = %v, want 9090 (first branch override wins)", got)
+	}
+}
+
+func TestIncludeThreeLevelDiamond(t *testing.T) {
+	dir := t.TempDir()
+
+	// D is shared at the bottom of a three-level diamond: root→A→D, root→B→C→D
+	writeFile(t, filepath.Join(dir, "d.yaml"), `
+vars:
+  d_var: from-d
+resources:
+  - kind: file
+    name: d-resource
+    spec:
+      path: /tmp/d
+      content: d
+`)
+
+	writeFile(t, filepath.Join(dir, "c.yaml"), `
+includes:
+  - path: d.yaml
+resources:
+  - kind: file
+    name: c-resource
+    spec:
+      path: /tmp/c
+      content: c
+`)
+
+	writeFile(t, filepath.Join(dir, "a.yaml"), `
+includes:
+  - path: d.yaml
+resources:
+  - kind: file
+    name: a-resource
+    spec:
+      path: /tmp/a
+      content: a
+`)
+
+	writeFile(t, filepath.Join(dir, "b.yaml"), `
+includes:
+  - path: c.yaml
+resources:
+  - kind: file
+    name: b-resource
+    spec:
+      path: /tmp/b
+      content: b
+`)
+
+	root := writeFile(t, filepath.Join(dir, "root.yaml"), `
+includes:
+  - path: a.yaml
+  - path: b.yaml
+resources:
+  - kind: file
+    name: root-resource
+    spec:
+      path: /tmp/root
+      content: root
+`)
+
+	m, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	// D's resources appear once (via A, the first branch to reach it)
+	// Order: d (via a) → a → c (d deduped) → b → root
+	if len(m.Resources) != 5 {
+		names := make([]string, len(m.Resources))
+		for i, r := range m.Resources {
+			names[i] = r.Name
+		}
+		t.Fatalf("len(Resources) = %d, want 5; names = %v", len(m.Resources), names)
+	}
+
+	wantNames := []string{"d-resource", "a-resource", "c-resource", "b-resource", "root-resource"}
+	for i, want := range wantNames {
+		if m.Resources[i].Name != want {
+			t.Errorf("resource[%d].Name = %q, want %q", i, m.Resources[i].Name, want)
+		}
+	}
+}
+
 func TestEachExpandsToMultipleResources(t *testing.T) {
 	path := writeManifest(t, `
 resources:
