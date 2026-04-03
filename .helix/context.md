@@ -2,7 +2,7 @@
 
 Project root: /home/erik/Projects/anneal
 Tracker: /home/erik/Projects/anneal/.helix/issues.jsonl
-Issue counts: ready=1, open=42, in-progress=0, closed=79
+Issue counts: ready=35, open=50, in-progress=1, closed=94
 
 ## Build/Test Commands
 
