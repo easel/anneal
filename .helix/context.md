@@ -2,7 +2,7 @@
 
 Project root: /home/erik/Projects/anneal
 Tracker: /home/erik/Projects/anneal/.helix/issues.jsonl
-Issue counts: ready=5, open=46, in-progress=0, closed=75
+Issue counts: ready=1, open=42, in-progress=0, closed=79
 
 ## Build/Test Commands
 
@@ -16,6 +16,12 @@ helix check                   # Decide next HELIX action
 helix design                  # Create design document
 helix review                  # Fresh-eyes review of recent work
 ```
+
+## Current Epic
+
+ID: hx-66f6a5fe
+Title: FEAT-015: Agentic Tool Interface
+Acceptance: anneal providers, anneal generate, anneal plan --json, anneal validate --json, and anneal merge commands exist and pass acceptance criteria from FEAT-015 user stories US-040 through US-044
 
 ## Key Rules
 
