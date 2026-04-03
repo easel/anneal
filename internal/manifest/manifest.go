@@ -29,13 +29,13 @@ type Manifest struct {
 }
 
 type Resource struct {
-	Kind      string         `yaml:"kind"`
-	Name      string         `yaml:"name"`
-	DependsOn []string       `yaml:"depends_on"`
-	Each      []any          `yaml:"each"`
-	Notify    []string       `yaml:"notify"`
-	Trigger   bool           `yaml:"trigger"`
-	Spec      map[string]any `yaml:"spec"`
+	Kind      string         `yaml:"kind" json:"kind"`
+	Name      string         `yaml:"name" json:"name"`
+	DependsOn []string       `yaml:"depends_on,omitempty" json:"depends_on,omitempty"`
+	Each      []any          `yaml:"each,omitempty" json:"each,omitempty"`
+	Notify    []string       `yaml:"notify,omitempty" json:"notify,omitempty"`
+	Trigger   bool           `yaml:"trigger,omitempty" json:"trigger,omitempty"`
+	Spec      map[string]any `yaml:"spec" json:"spec"`
 }
 
 type ResolvedManifest struct {

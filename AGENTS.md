@@ -56,9 +56,16 @@ go vet ./...                   # Static analysis
 `anneal validate -f <manifest>` — parse and validate without system access
 `anneal plan -f <manifest>` — build execution plan (stub)
 `anneal apply -f <manifest>` — apply plan (stub)
+`anneal providers` — list available providers and their spec schemas
+`anneal generate` — generate manifest fragments from structured input or goals
+`anneal merge <base> <fragment>` — merge a manifest fragment into a base manifest
 `anneal version` — print version
 
 Default manifest path: `anneal.yaml`
+
+Global flags: `--manifest/-f` (default `anneal.yaml`), `--host-vars` (host-specific
+variable overrides file). The `validate`, `plan`, and `apply` commands accept `--json`
+for machine-readable output.
 
 ### Test Strategy
 
