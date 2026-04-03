@@ -43,7 +43,10 @@ func (sp *ShellProvider) Plan(resource manifest.ResolvedResource) ([]string, err
 	// 2. Calls read to get current state
 	// 3. Calls diff to compare desired vs current
 	// 4. Calls emit to produce operations
-	wrapper := sp.buildPlanScript(string(specJSON), resource.Spec)
+	wrapper, err := sp.buildPlanScript(string(specJSON), resource.Spec)
+	if err != nil {
+		return nil, err
+	}
 
 	// Execute in the embedded interpreter with stdlib available.
 	full := stdlibPreamble + "\n" + wrapper
@@ -75,12 +78,24 @@ func (sp *ShellProvider) Plan(resource manifest.ResolvedResource) ([]string, err
 }
 
 // buildPlanScript constructs the shell script that orchestrates read/diff/emit.
-func (sp *ShellProvider) buildPlanScript(specJSON string, spec map[string]any) string {
+// It returns an error if two spec keys produce the same sanitized env var name.
+func (sp *ShellProvider) buildPlanScript(specJSON string, spec map[string]any) (string, error) {
 	var buf bytes.Buffer
 
 	// Export the full spec as JSON.
 	buf.WriteString(fmt.Sprintf("ANNEAL_SPEC=%s\n", shellQuote(specJSON)))
 	buf.WriteString("export ANNEAL_SPEC\n")
+
+	// Check for colliding sanitized env key names before exporting.
+	seen := make(map[string]string, len(spec)) // sanitized env key → original spec key
+	for key := range spec {
+		envKey := "ANNEAL_SPEC_" + sanitizeEnvKey(strings.ToUpper(key))
+		if prev, ok := seen[envKey]; ok {
+			return "", fmt.Errorf("shell provider %s: spec keys %q and %q both sanitize to env var %s",
+				sp.Kind, prev, key, envKey)
+		}
+		seen[envKey] = key
+	}
 
 	// Export individual spec fields as ANNEAL_SPEC_<KEY> for convenience.
 	for key, val := range spec {
@@ -112,7 +127,7 @@ func (sp *ShellProvider) buildPlanScript(specJSON string, spec map[string]any) s
 	buf.WriteString("  printf '%s' \"$_anneal_changes\" | emit\n")
 	buf.WriteString("fi\n")
 
-	return buf.String()
+	return buf.String(), nil
 }
 
 // DiscoverShellProviders scans the providers/ directory relative to the manifest

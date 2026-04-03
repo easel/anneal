@@ -287,6 +287,46 @@ emit() {
 	}
 }
 
+func TestShellProviderPlan_CollidingKeys(t *testing.T) {
+	sp := &ShellProvider{
+		Kind:       "env_test",
+		ScriptPath: "/tmp/providers/env_test.sh",
+		Script: `
+read() {
+  echo "none"
+}
+
+diff() {
+  echo "changed"
+}
+
+emit() {
+  echo "echo ok"
+}
+`,
+	}
+
+	resource := manifest.ResolvedResource{
+		Kind: "env_test",
+		Name: "test-resource",
+		Spec: map[string]any{
+			"my-key": "value1",
+			"my.key": "value2",
+		},
+	}
+
+	_, err := sp.Plan(resource)
+	if err == nil {
+		t.Fatal("expected error for colliding sanitized keys, got nil")
+	}
+	if !strings.Contains(err.Error(), "both sanitize to env var") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+	if !strings.Contains(err.Error(), "ANNEAL_SPEC_MY_KEY") {
+		t.Errorf("error should mention the colliding env var name, got: %v", err)
+	}
+}
+
 func TestSanitizeEnvKey(t *testing.T) {
 	tests := []struct {
 		input string
