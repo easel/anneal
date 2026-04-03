@@ -157,6 +157,7 @@ func newValidateCmd(opts *options) *cobra.Command {
 
 func newPlanCmd(opts *options) *cobra.Command {
 	var jsonOutput bool
+	var outputPath string
 	cmd := &cobra.Command{
 		Use:   "plan",
 		Short: "Build an execution plan from the manifest",
@@ -169,6 +170,18 @@ func newPlanCmd(opts *options) *cobra.Command {
 			if err != nil {
 				return err
 			}
+
+			// Determine output destination.
+			w := cmd.OutOrStdout()
+			if outputPath != "" {
+				f, err := os.Create(outputPath)
+				if err != nil {
+					return fmt.Errorf("opening output file: %w", err)
+				}
+				defer f.Close()
+				w = f
+			}
+
 			if jsonOutput {
 				plan, err := engine.NewPlanner().BuildPlan(resolved.Resources)
 				if err != nil {
@@ -188,21 +201,22 @@ func newPlanCmd(opts *options) *cobra.Command {
 						Trigger:    rp.Trigger,
 					})
 				}
-				return writeJSON(cmd.OutOrStdout(), planOutput{Resources: resources})
+				return writeJSON(w, planOutput{Resources: resources})
 			}
 			plan, err := engine.NewPlanner().Build(resolved.Resources)
 			if err != nil {
 				return err
 			}
 			if plan == "" {
-				fmt.Fprintln(cmd.OutOrStdout(), "# plan is empty")
+				fmt.Fprintln(w, "# plan is empty")
 				return nil
 			}
-			fmt.Fprint(cmd.OutOrStdout(), plan)
+			fmt.Fprint(w, plan)
 			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output structured JSON")
+	cmd.Flags().StringVarP(&outputPath, "output", "o", "", "Write plan to file instead of stdout")
 	return cmd
 }
 

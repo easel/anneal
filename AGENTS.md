@@ -54,7 +54,7 @@ go vet ./...                   # Static analysis
 ### CLI Commands
 
 `anneal validate -f <manifest>` — parse and validate without system access
-`anneal plan -f <manifest>` — build execution plan (stub)
+`anneal plan -f <manifest>` — build execution plan (stub); `-o <file>` writes to file
 `anneal apply -f <manifest>` — apply plan (stub)
 `anneal providers` — list available providers and their spec schemas
 `anneal generate` — generate manifest fragments from structured input or goals

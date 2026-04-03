@@ -377,6 +377,68 @@ resources:
 	}
 }
 
+func TestPlanOutputFlag(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "motd")
+	outFile := filepath.Join(t.TempDir(), "plan.sh")
+	manifestPath := writeManifest(t, `
+resources:
+  - kind: file
+    name: motd
+    spec:
+      path: `+target+`
+      content: hello
+`)
+
+	stdout, stderr, code := runCLI(t, "dev", "plan", "-o", outFile, "-f", manifestPath)
+	if code != ExitCodeSuccess {
+		t.Fatalf("exit code = %d, want %d\nstderr: %s", code, ExitCodeSuccess, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout should be empty when -o is used, got %q", stdout)
+	}
+
+	data, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatalf("reading output file: %v", err)
+	}
+	if !strings.Contains(string(data), "stdlib_file_write") {
+		t.Fatalf("output file missing stdlib_file_write: %s", string(data))
+	}
+}
+
+func TestPlanOutputFlagJSON(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "motd")
+	outFile := filepath.Join(t.TempDir(), "plan.json")
+	manifestPath := writeManifest(t, `
+resources:
+  - kind: file
+    name: motd
+    spec:
+      path: `+target+`
+      content: hello
+`)
+
+	stdout, stderr, code := runCLI(t, "dev", "plan", "--json", "-o", outFile, "-f", manifestPath)
+	if code != ExitCodeSuccess {
+		t.Fatalf("exit code = %d, want %d\nstderr: %s", code, ExitCodeSuccess, stderr)
+	}
+	if stdout != "" {
+		t.Fatalf("stdout should be empty when -o is used, got %q", stdout)
+	}
+
+	data, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatalf("reading output file: %v", err)
+	}
+	var result planOutput
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("JSON parse error: %v\noutput: %s", err, string(data))
+	}
+	if len(result.Resources) != 1 {
+		t.Fatalf("resources count = %d, want 1", len(result.Resources))
+	}
+}
+
 func TestApplyJSON(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "motd")
