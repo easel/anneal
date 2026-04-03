@@ -1007,6 +1007,45 @@ resources:
 	}
 }
 
+func TestEachExpansionDuplicateNameError(t *testing.T) {
+	// Two each-based resources with different raw names expand to the same
+	// resolved name. ValidateMerged cannot catch this because the raw names
+	// differ; only post-expansion duplicate detection in Resolve() can.
+	path := writeManifest(t, `
+vars:
+  prefix_a: svc
+  prefix_b: svc
+resources:
+  - kind: file
+    name: "{{ .prefix_a }}-{{ .Item }}"
+    each:
+      - api
+      - web
+    spec:
+      path: "/tmp/{{ .Item }}"
+      content: a
+  - kind: file
+    name: "{{ .prefix_b }}-{{ .Item }}"
+    each:
+      - db
+      - api
+    spec:
+      path: "/tmp/{{ .Item }}"
+      content: b
+`)
+
+	_, err := LoadResolved(path, ResolveOptions{})
+	if err == nil {
+		t.Fatal("LoadResolved() expected error for post-expansion duplicate resource name")
+	}
+	if !strings.Contains(err.Error(), "duplicate resource name") {
+		t.Fatalf("error = %q, want containing 'duplicate resource name'", err)
+	}
+	if !strings.Contains(err.Error(), "svc-api") {
+		t.Fatalf("error = %q, want containing 'svc-api'", err)
+	}
+}
+
 func TestBuiltinsWithDefaultsFQDNUsesCallerHostname(t *testing.T) {
 	b := Builtins{Hostname: "custom-host"}
 	got := b.withDefaults()

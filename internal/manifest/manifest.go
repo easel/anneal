@@ -368,6 +368,17 @@ func (m *Manifest) Resolve(opts ResolveOptions) (*ResolvedManifest, error) {
 			DeclarationOrder: idx,
 		})
 	}
+
+	// Post-expansion duplicate name check: each-expansion can produce collisions
+	// that ValidateMerged (which runs on the raw manifest) cannot detect.
+	seenNames := make(map[string]int, len(resolved.Resources))
+	for idx, r := range resolved.Resources {
+		if prev, exists := seenNames[r.Name]; exists {
+			return nil, fmt.Errorf("duplicate resource name %q after expansion (resource %d and %d)", r.Name, prev, idx)
+		}
+		seenNames[r.Name] = idx
+	}
+
 	return resolved, nil
 }
 
