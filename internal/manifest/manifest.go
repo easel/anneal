@@ -29,13 +29,14 @@ type Manifest struct {
 }
 
 type Resource struct {
-	Kind      string         `yaml:"kind" json:"kind"`
-	Name      string         `yaml:"name" json:"name"`
-	DependsOn []string       `yaml:"depends_on,omitempty" json:"depends_on,omitempty"`
-	Each      []any          `yaml:"each,omitempty" json:"each,omitempty"`
-	Notify    []string       `yaml:"notify,omitempty" json:"notify,omitempty"`
-	Trigger   bool           `yaml:"trigger,omitempty" json:"trigger,omitempty"`
-	Spec      map[string]any `yaml:"spec" json:"spec"`
+	Kind       string         `yaml:"kind" json:"kind"`
+	Name       string         `yaml:"name" json:"name"`
+	DependsOn  []string       `yaml:"depends_on,omitempty" json:"depends_on,omitempty"`
+	Each       []any          `yaml:"each,omitempty" json:"each,omitempty"`
+	Notify     []string       `yaml:"notify,omitempty" json:"notify,omitempty"`
+	Trigger    bool           `yaml:"trigger,omitempty" json:"trigger,omitempty"`
+	Spec       map[string]any `yaml:"spec" json:"spec"`
+	SourceFile string         `yaml:"-" json:"source_file,omitempty"`
 }
 
 type ResolvedManifest struct {
@@ -105,6 +106,11 @@ func loadSingle(path string) (*Manifest, error) {
 	}
 	if err := manifest.Validate(); err != nil {
 		return nil, fmt.Errorf("load manifest %s: %w", path, err)
+	}
+
+	// Tag each resource with its source file for provenance tracking.
+	for i := range manifest.Resources {
+		manifest.Resources[i].SourceFile = path
 	}
 
 	return &manifest, nil
@@ -235,12 +241,21 @@ func (m *Manifest) Validate() error {
 // ValidateMerged checks constraints that only apply after include merging,
 // such as duplicate resource names across included manifests.
 func (m *Manifest) ValidateMerged() error {
-	seen := map[string]int{}
+	type resourceRef struct {
+		index      int
+		sourceFile string
+	}
+	seen := map[string]resourceRef{}
 	for idx, resource := range m.Resources {
 		if prev, exists := seen[resource.Name]; exists {
-			return fmt.Errorf("duplicate resource name %q (resource %d and %d)", resource.Name, prev, idx)
+			prevFile := prev.sourceFile
+			curFile := resource.SourceFile
+			if prevFile != "" && curFile != "" {
+				return fmt.Errorf("duplicate resource name %q (resource %d from %s and %d from %s)", resource.Name, prev.index, prevFile, idx, curFile)
+			}
+			return fmt.Errorf("duplicate resource name %q (resource %d and %d)", resource.Name, prev.index, idx)
 		}
-		seen[resource.Name] = idx
+		seen[resource.Name] = resourceRef{index: idx, sourceFile: resource.SourceFile}
 	}
 	return nil
 }

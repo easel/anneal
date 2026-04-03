@@ -565,6 +565,12 @@ resources:
 	if !strings.Contains(err.Error(), "conflicting-name") {
 		t.Fatalf("error = %q, want containing resource name 'conflicting-name'", err)
 	}
+	if !strings.Contains(err.Error(), "module_a.yaml") {
+		t.Fatalf("error = %q, want containing source file 'module_a.yaml'", err)
+	}
+	if !strings.Contains(err.Error(), "module_b.yaml") {
+		t.Fatalf("error = %q, want containing source file 'module_b.yaml'", err)
+	}
 }
 
 func TestIncludeDiamondWithVarOverrides(t *testing.T) {
